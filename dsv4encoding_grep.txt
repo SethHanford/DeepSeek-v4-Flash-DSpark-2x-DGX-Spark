@@ -159,3 +159,63 @@
 1004:    if role in ("user", "developer"):
 1006:    scan_text = role not in ("tool", "function")
 1012:            "images in " + repr(role) + " messages return a 400 error."
+
+
+=== 560-616.sed
+        context = sort_tool_results_by_call_order(context)
+
+    full_messages = context + messages
+
+    prompt = bos_token if add_default_bos_token and len(context) == 0 else ""
+
+    # Resolve drop_thinking: if any message has tools defined, don't drop thinking
+    effective_drop_thinking = drop_thinking
+    if any(m.get("tools") for m in full_messages):
+        effective_drop_thinking = False
+
+    if thinking_mode == "thinking" and effective_drop_thinking:
+        full_messages = _drop_thinking_messages(full_messages)
+        # After dropping, recalculate how many messages to render
+        # (context may have shrunk too)
+        num_to_render = len(full_messages) - len(_drop_thinking_messages(context))
+        context_len = len(full_messages) - num_to_render
+    else:
+        num_to_render = len(messages)
+        context_len = len(context)
+
+    for idx in range(num_to_render):
+        prompt += render_message(
+            idx + context_len,
+            full_messages,
+            thinking_mode=thinking_mode,
+            drop_thinking=effective_drop_thinking,
+            reasoning_effort=reasoning_effort,
+        )
+
+    return prompt
+
+
+def _drop_thinking_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Drop reasoning_content and non-essential messages before the last user message.
+
+    Behavior:
+    - Messages with role in ["user", "system", "tool", "latest_reminder"] are always kept.
+    - Messages at or after the last user index are always kept.
+    - Assistant messages before the last user get reasoning_content removed.
+    - Developer messages before the last user are dropped entirely.
+    """
+    last_user_idx = find_last_user_index(messages)
+    result = []
+    keep_roles = {"user", "system", "tool", "latest_reminder", "direct_search_results"}
+
+    for idx, msg in enumerate(messages):
+        role = msg.get("role")
+        if role in keep_roles or idx >= last_user_idx:
+            result.append(msg)
+        elif role == "assistant":
+            msg = copy.copy(msg)
+            msg.pop("reasoning_content", None)
+            result.append(msg)
+        # developer and other roles before last_user_idx are dropped
+
