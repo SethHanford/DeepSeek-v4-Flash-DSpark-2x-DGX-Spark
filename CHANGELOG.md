@@ -1,3 +1,8 @@
+## 2026-10-03
+
+### Added
+- **Drop historical reasoning with tools (`DSPARK_ENABLE_DROP_HISTORY_REASONING`, default 0)**: `patches/hotfix-dsv4-drop-history-reasoning.py` removes the checkpoint encoder's tools override in `_encode_messages_text` (`deepseek_v4_encoding.py`) that force-disabled reasoning dropping whenever tool definitions were present. For tool-using agents the stock path re-encodes every earlier assistant turn's `reasoning_content` into the prompt; the replayed reasoning self-contaminates the context and the thinking channel degenerates into a repetition loop that runs until `max_tokens` ([#237](https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark/issues/237)). With the flag on, `drop_thinking` is honored even with tools: earlier-turn reasoning is dropped and only the live turn (messages at/after the last user index) reasons, matching the official DeepSeek API. Fail-closed source-exact patcher with a `--status` path; opt-in and default-off so stock behavior is unchanged. Live-turn output, EOS, and tool rendering are byte-identical. Recreate both ranks when flipping; A/B tool-call quality (not just loop incidence) before any default change, since the override looks deliberate for multi-turn tool chains.
+
 ## 2026-09-08
 
 ### Security
