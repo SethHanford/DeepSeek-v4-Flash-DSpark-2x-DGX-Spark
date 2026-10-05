@@ -89,6 +89,8 @@ py_files+=(
   patches/hotfix-vllm-c128a-prefill-cache.py
   scripts/test-issue144-effort-align.py
   patches/hotfix-dsv4-issue144-effort-align.py
+  scripts/test-issue237-drop-history-reasoning.py
+  patches/hotfix-dsv4-drop-history-reasoning.py
   scripts/test-issue117-shm-ring-buffer.py
   scripts/verify-issue136-xgrammar-live.py
   scripts/test-empty-encoder-output-hotfix.py
@@ -191,6 +193,8 @@ python3 scripts/test-c128a-prefill-cache.py -q
 ok "test-c128a-prefill-cache"
 python3 scripts/test-issue144-effort-align.py -q
 ok "test-issue144-effort-align"
+python3 scripts/test-issue237-drop-history-reasoning.py -q
+ok "test-issue237-drop-history-reasoning"
 python3 scripts/test-issue117-shm-ring-buffer.py -q
 ok "test-issue117-shm-ring-buffer"
 python3 scripts/test-empty-encoder-output-hotfix.py -q
@@ -696,6 +700,15 @@ if grep -Fq 'DSPARK_ENABLE_ISSUE144_EFFORT_ALIGN: "${DSPARK_ENABLE_ISSUE144_EFFO
 else
   bad "issue #144 effort alignment must be default-off, fail-closed, worker-synced and preflighted"
 fi
+# Issue #237 drop-history-reasoning: default OFF, exact-1/fail-closed, worker-synced.
+if grep -Fq 'DSPARK_ENABLE_DROP_HISTORY_REASONING: "${DSPARK_ENABLE_DROP_HISTORY_REASONING:-0}"' docker-compose.dspark.yml \
+  && grep -Fq 'if [ "$${DSPARK_ENABLE_DROP_HISTORY_REASONING:-0}" = "1" ]; then python3 /opt/hotfix-dsv4-drop-history-reasoning.py || exit 1; fi;' docker-compose.dspark.yml \
+  && grep -Fq "DSPARK_DROP_HISTORY_REASONING_HOTFIX='./patches/hotfix-dsv4-drop-history-reasoning.py'" start-deepseek-v4-flash-dspark.sh \
+  && grep -Fq 'DSPARK_ENABLE_DROP_HISTORY_REASONING=0' .env.dspark.example; then
+  ok "compose/launcher gate the issue #237 drop-history-reasoning"
+else
+  bad "issue #237 drop-history-reasoning must be default-off, fail-closed and worker-synced"
+fi
 
 # Launcher remote_compose/remote_compose2 must each be defined exactly once and
 # carry the full feature passthrough set (a stacked-merge conflict once dropped
@@ -710,10 +723,11 @@ for fn in remote_compose remote_compose2; do
     && grep -Fq 'DSPARK_ENABLE_DSPARK_SWA_PREFIX=$REMOTE_DSPARK_SWA_PREFIX' <<<"$body" \
     && grep -Fq 'DSPARK_ENABLE_DSML_RECOVERY=$REMOTE_DSML_RECOVERY' <<<"$body" \
     && grep -Fq 'DSPARK_ENABLE_MXFP4_INDEXER_CACHE=$REMOTE_MXFP4_INDEXER' <<<"$body" \
-    && grep -Fq 'DSPARK_ENABLE_ISSUE144_EFFORT_ALIGN=$REMOTE_ISSUE144_EFFORT_ALIGN' <<<"$body"; then
+    && grep -Fq 'DSPARK_ENABLE_ISSUE144_EFFORT_ALIGN=$REMOTE_ISSUE144_EFFORT_ALIGN' <<<"$body" \
+    && grep -Fq 'DSPARK_ENABLE_DROP_HISTORY_REASONING=$REMOTE_DROP_HISTORY_REASONING' <<<"$body"; then
     ok "$fn carries the full passthrough set exactly once"
   else
-    bad "$fn must be defined exactly once and carry issue191/async/block-k + rope-swa/swa-prefix/dsml-recovery/mxfp4-indexer/issue144 passthroughs"
+    bad "$fn must be defined exactly once and carry issue191/async/block-k + rope-swa/swa-prefix/dsml-recovery/mxfp4-indexer/issue144/drop-history passthroughs"
   fi
 done
 echo "CI validate passed (CPU recipe gates only)."
