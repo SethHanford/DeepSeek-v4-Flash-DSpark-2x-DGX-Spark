@@ -408,8 +408,13 @@ services:
       DSPARK_ISSUE237_REPETITION_PENALTY: "${DSPARK_ISSUE237_REPETITION_PENALTY:-1.05}"
       # Issue #237 generation logging (sitecustomize token logger). 0 (default)
       # = logging off (stock empty sitecustomize used). 1 = remove the /usr/lib
-      # symlink so the dist-packages sitecustomize logger is loaded.
+      # symlink so the dist-packages sitecustomize logger is loaded. The symlink
+      # is only removed if its target is empty (size 0) unless the dangerous
+      # clobber flag is set.
       DSPARK_ENABLE_ISSUE237_LOGGING: "${DSPARK_ENABLE_ISSUE237_LOGGING:-0}"
+      # Dangerous: force-clobber a non-empty /usr/lib sitecustomize with the
+      # issue237 logger. 0 (default) = only overwrite an empty sitecustomize.
+      DSPARK_ISSUE237_CLOBBER_SITECUSTOMIZE: "${DSPARK_ISSUE237_CLOBBER_SITECUSTOMIZE:-0}"
       # Issue #66: GPU V2 thinking_token_budget hotfix. 0 (default) = stock
       # sampler (HTTP 400 if a client sends the field). 1 = apply at boot
       # (fail-closed) so explicit thinking_token_budget works. Omit-field
@@ -505,7 +510,7 @@ services:
         REVISION_ARGS="";
         if [ -n "$${DSPARK_REVISION:-}" ]; then REVISION_ARGS="--revision $${DSPARK_REVISION}"; fi;
         LIMIT_MM_RAW='${LIMIT_MM_PER_PROMPT:-image=8}'; case "$${LIMIT_MM_RAW}" in image=*) _lim_n="$${LIMIT_MM_RAW#image=}"; case "$${_lim_n}" in ''|*[!0-9]*) echo "error: LIMIT_MM_PER_PROMPT image=N needs an integer (Anemll --limit-mm-per-prompt requires JSON)" >&2; exit 2 ;; esac; LIMIT_MM_JSON="{\"image\":$${_lim_n}}" ;; *) LIMIT_MM_JSON="$${LIMIT_MM_RAW}" ;; esac; LIMIT_MM_ARGS=(--limit-mm-per-prompt "$${LIMIT_MM_JSON}");
-        if [ "$${DSPARK_ENABLE_ISSUE237_LOGGING:-0}" = "1" ]; then rm -f /usr/lib/python3.12/sitecustomize.py; fi;
+        if [ "$${DSPARK_ENABLE_ISSUE237_LOGGING:-0}" = "1" ]; then if [ ! -s /usr/lib/python3.12/sitecustomize.py ] || [ "$${DSPARK_ISSUE237_CLOBBER_SITECUSTOMIZE:-0}" = "1" ]; then rm -f /usr/lib/python3.12/sitecustomize.py; else echo "issue237: NOT clobbering non-empty sitecustomize (set DSPARK_ISSUE237_CLOBBER_SITECUSTOMIZE=1 to force)" >&2; fi; fi;
         exec /usr/local/bin/vllm serve ${DSPARK_MODEL:-deepseek-ai/DeepSeek-V4-Flash-Vision-Exp}
         $${REVISION_ARGS}
         --served-model-name ${SERVED_MODEL_NAME:-deepseek-v4-flash-vision-exp}
