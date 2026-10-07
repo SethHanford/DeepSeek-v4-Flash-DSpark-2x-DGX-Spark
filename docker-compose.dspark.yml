@@ -116,6 +116,12 @@ services:
       # localaiguyy/DeepSeek-V4-Flash-DSpark-3x-DGX-Spark.
       - ${TP3_PATCH_DIR:-./patches/tp3}:/opt/dsv4-tp3:ro
       - ${DSPARK_TMP_HOST:-${HOME}/.cache/dspark-tmp}:/tmp
+      # LOCAL diagnostic: issue237 generation instrumentation. Mounted to the
+      # dist-packages sitecustomize path (a regular file, unlike
+      # /usr/lib/python3.12/sitecustomize.py which is a symlink and cannot be
+      # bind-mounted). The entrypoint removes the /usr/lib symlink so Python
+      # falls through to this dist-packages sitecustomize. Diagnostic only.
+      - ${DSPARK_PATCHES_DIR:-./patches}/sitecustomize.py:/usr/local/lib/python3.12/dist-packages/sitecustomize.py:ro
 
     # Env surface is split by runtime image:
     #   - This file: knobs registered (or non-VLLM_) on Anemll 0.1.1
@@ -495,6 +501,11 @@ services:
         REVISION_ARGS="";
         if [ -n "$${DSPARK_REVISION:-}" ]; then REVISION_ARGS="--revision $${DSPARK_REVISION}"; fi;
         LIMIT_MM_RAW='${LIMIT_MM_PER_PROMPT:-image=8}'; case "$${LIMIT_MM_RAW}" in image=*) _lim_n="$${LIMIT_MM_RAW#image=}"; case "$${_lim_n}" in ''|*[!0-9]*) echo "error: LIMIT_MM_PER_PROMPT image=N needs an integer (Anemll --limit-mm-per-prompt requires JSON)" >&2; exit 2 ;; esac; LIMIT_MM_JSON="{\"image\":$${_lim_n}}" ;; *) LIMIT_MM_JSON="$${LIMIT_MM_RAW}" ;; esac; LIMIT_MM_ARGS=(--limit-mm-per-prompt "$${LIMIT_MM_JSON}");
+        # LOCAL diagnostic: remove the stock /usr/lib sitecustomize symlink so
+        # Python falls through to the dist-packages sitecustomize mounted above.
+        # MUST run BEFORE exec vllm serve (the engine imports sitecustomize at
+        # interpreter startup). No-op if the file is already a regular file.
+        rm -f /usr/lib/python3.12/sitecustomize.py;
         exec /usr/local/bin/vllm serve ${DSPARK_MODEL:-deepseek-ai/DeepSeek-V4-Flash-Vision-Exp}
         $${REVISION_ARGS}
         --served-model-name ${SERVED_MODEL_NAME:-deepseek-v4-flash-vision-exp}
