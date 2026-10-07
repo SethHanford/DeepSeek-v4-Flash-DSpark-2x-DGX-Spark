@@ -68,20 +68,41 @@ of the same planning phrase. This is most pronounced when the model is planning 
 action it cannot take (e.g., running commands against containers that are not on
 the local machine).
 
+## Tool-call path investigation (root cause confirmed)
+The looping request was decoded and checked for tool-call DSML structure:
+
+- **`<tool_calls>`: False** — the model did NOT emit any tool-call DSML structure.
+- **`<invoke`: False** — no tool invocation.
+- **`Let me`: 41 occurrences** — the model narrated "Let me..." 41 times.
+- **`check the API key`: 16 occurrences** — repeated the same phrase 16 times.
+
+The model is **narrating actions it intends to take but never emits the tool-call
+DSML structure** (`<tool_calls><invoke name="...">`). It says "Let me check the API
+key" repeatedly but never makes the actual tool call.
+
+The tool-call parser (`vllm/parser/deepseek_v4.py`) is a state machine that only
+emits a `TOOL_CALL_START` event when it sees the DSML `<invoke name="...>` marker.
+When the model generates "Let me [action]" as plain content (no DSML structure),
+the parser extracts `tool_calls = []`, so the serving layer treats it as plain text
+and `finish_reason` is not "tool_calls". The model, still expecting to make a tool
+call, re-narrates the preamble and loops.
+
 ## Revised conclusion
 The repetition penalty is a **partial mitigation, not a complete fix**. It reduces
 the rigidity of the loop but does not address the underlying cause: the model falls
-into a **behavioral planning loop** when it cannot resolve a planned action. The
-real fix likely involves the **tool-call / action-resolution path** (ensuring a
-planned action either resolves or produces a different response), not just sampling
-parameters.
+into a **behavioral planning loop** where it narrates an action it intends to take
+but never emits the tool-call DSML structure. The model keeps leading into a tool
+call that never materializes.
 
 ## Proposed fix (revised)
 1. **Repetition penalty** (implemented) — suppresses repeated preamble, partial
    mitigation.
-2. **Tool-call / action-resolution** — investigate why the model loops on the
-   "Let me [action]" preamble instead of completing the action or producing a
-   different response when the action cannot be taken.
+2. **Tool-call emission** — ensure the model emits the tool-call DSML structure
+   when it starts narrating an action (better tool-call prompting/guidance), so the
+   planned action actually leads to a tool call.
+3. **Loop-breaking on narration-without-call** — detect the repeated "Let me"
+   preamble and force a different response when the model narrates without emitting
+   a tool call.
 
 ## Artifacts preserved
 - `sitecustomize-loaded-after-serve2.jsonl` — the baseline loop capture (no penalty).
