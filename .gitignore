@@ -24,3 +24,9 @@ start-deepseek-v4-flash-dspark-gb10.sh
 plugins/dspark_vision_mcp/.venv/
 plugins/dspark_vision_mcp/build/
 plugins/dspark_vision_mcp/**/__pycache__/
+
+# issue237 generation captures: raw token IDs from live sessions decode to
+# sensitive text (usernames, hostnames, paths). Never commit these.
+issue237_capture*.jsonl
+issue237_gen_capture*.jsonl
+sitecustomize-loaded-after-serve*.jsonl
