@@ -406,6 +406,10 @@ services:
       # default (1.0 = no penalty). 0 (default) = stock sampler. 1 = clamp at boot.
       DSPARK_ENABLE_ISSUE237_REPETITION_PENALTY: "${DSPARK_ENABLE_ISSUE237_REPETITION_PENALTY:-0}"
       DSPARK_ISSUE237_REPETITION_PENALTY: "${DSPARK_ISSUE237_REPETITION_PENALTY:-1.05}"
+      # Issue #237 generation logging (sitecustomize token logger). 0 (default)
+      # = logging off (stock empty sitecustomize used). 1 = remove the /usr/lib
+      # symlink so the dist-packages sitecustomize logger is loaded.
+      DSPARK_ENABLE_ISSUE237_LOGGING: "${DSPARK_ENABLE_ISSUE237_LOGGING:-0}"
       # Issue #66: GPU V2 thinking_token_budget hotfix. 0 (default) = stock
       # sampler (HTTP 400 if a client sends the field). 1 = apply at boot
       # (fail-closed) so explicit thinking_token_budget works. Omit-field
@@ -501,7 +505,7 @@ services:
         REVISION_ARGS="";
         if [ -n "$${DSPARK_REVISION:-}" ]; then REVISION_ARGS="--revision $${DSPARK_REVISION}"; fi;
         LIMIT_MM_RAW='${LIMIT_MM_PER_PROMPT:-image=8}'; case "$${LIMIT_MM_RAW}" in image=*) _lim_n="$${LIMIT_MM_RAW#image=}"; case "$${_lim_n}" in ''|*[!0-9]*) echo "error: LIMIT_MM_PER_PROMPT image=N needs an integer (Anemll --limit-mm-per-prompt requires JSON)" >&2; exit 2 ;; esac; LIMIT_MM_JSON="{\"image\":$${_lim_n}}" ;; *) LIMIT_MM_JSON="$${LIMIT_MM_RAW}" ;; esac; LIMIT_MM_ARGS=(--limit-mm-per-prompt "$${LIMIT_MM_JSON}");
-        rm -f /usr/lib/python3.12/sitecustomize.py;
+        if [ "$${DSPARK_ENABLE_ISSUE237_LOGGING:-0}" = "1" ]; then rm -f /usr/lib/python3.12/sitecustomize.py; fi;
         exec /usr/local/bin/vllm serve ${DSPARK_MODEL:-deepseek-ai/DeepSeek-V4-Flash-Vision-Exp}
         $${REVISION_ARGS}
         --served-model-name ${SERVED_MODEL_NAME:-deepseek-v4-flash-vision-exp}
