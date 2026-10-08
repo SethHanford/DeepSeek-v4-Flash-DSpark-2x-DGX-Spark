@@ -28,8 +28,8 @@ CI = ROOT / "scripts" / "ci-validate.sh"
 
 STOCK_SHA256 = "46c29434caf5f415129ef4a9bb2b8d4f62d2765596e3e07f73ad2b198c7def1b"
 STOCK_SIZE = 10608
-PATCHED_SHA256 = "c72138ef031ed8a97846b05c4c68986a7ad9061373b844b5d4843b0ed5a16f80"
-PATCHED_SIZE = 11320
+PATCHED_SHA256 = "9812321ac202e70611d6a2352db2fcc866f5d9c9433d647aa3536dc99e39db49"
+PATCHED_SIZE = 11476
 
 
 def _load_patcher():
@@ -193,6 +193,18 @@ class ClampContract(unittest.TestCase):
                 os.environ.pop("DSPARK_ISSUE237_REPETITION_PENALTY", None)
             else:
                 os.environ["DSPARK_ISSUE237_REPETITION_PENALTY"] = saved
+
+    def test_resolve_clamps_default_to_min(self):
+        ns = self._namespace()
+        self.assertEqual(ns["_issue237_resolve_rep_penalty"](1.0), ns["_MIN_REPETITION_PENALTY"])
+
+    def test_resolve_clamps_sub_one_to_min(self):
+        ns = self._namespace()
+        self.assertEqual(ns["_issue237_resolve_rep_penalty"](0.9), ns["_MIN_REPETITION_PENALTY"])
+
+    def test_resolve_leaves_explicit_penalty_untouched(self):
+        ns = self._namespace()
+        self.assertEqual(ns["_issue237_resolve_rep_penalty"](1.2), 1.2)
 
 
 class Patcher(unittest.TestCase):

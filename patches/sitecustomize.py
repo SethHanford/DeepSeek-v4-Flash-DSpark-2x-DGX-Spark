@@ -8,8 +8,10 @@ sequence, and repetition window to /tmp/issue237_gen_capture.jsonl.
 This is diagnostic only. It does not change model behavior. Deploy it as a sitecustomize.py on the Python path so it auto-loads in the
 engine process (a docker exec of a separate process will NOT work).
 
-Usage (inside container, before the engine starts):
-    python3 /opt/instrument-generation-issue237.py
+Deployment: this file is mounted as
+``/usr/local/lib/python3.12/dist-packages/sitecustomize.py`` by
+``docker-compose.dspark.yml`` (see ``DSPARK_ENABLE_ISSUE237_LOGGING``), so it
+auto-loads when the engine process starts. It is not meant to be run directly.
 """
 from __future__ import annotations
 

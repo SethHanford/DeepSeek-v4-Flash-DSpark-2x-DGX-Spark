@@ -2083,6 +2083,26 @@ if [ "${DSPARK_ENABLE_ISSUE237_REPETITION_PENALTY:-0}" = "1" ]; then
   echo "Checking Issue #237 repetition penalty compatibility on the head before either rank starts..."
   compose_base 0 "" run --rm --no-deps --entrypoint python3 vllm-dspark /opt/hotfix-vllm-issue237-repetition-penalty.py --check
 fi
+if [ "${DSPARK_ENABLE_ISSUE237_TOOLCALL_DIRECTIVE:-0}" = "1" ]; then
+  echo "Checking Issue #237 toolcall directive compatibility on the worker before either rank starts..."
+  remote_compose "NODE_RANK=1 HEADLESS=1 $WORKER_HF_COMPOSE_ENV VLLM_HOST_IP='$WORKER_VLLM_HOST_IP' GPU_MEMORY_UTILIZATION='$GPU_MEMORY_UTILIZATION' DSPARK_MODEL='$DSPARK_MODEL' DSPARK_REVISION='${DSPARK_REVISION:-}' ENABLE_VLLM_GB10_PATCH='$ENABLE_VLLM_GB10_PATCH' VLLM_GB10_PATCH_DIR='./vllm_patch_gb10' GB10_HYBRID_NVFP4_M_THRESHOLD='${GB10_HYBRID_NVFP4_M_THRESHOLD:-128}' docker compose -p '$PROJECT_NAME' --env-file .env.dspark $WORKER_COMPOSE_FILES run --rm --no-deps --entrypoint python3 vllm-dspark /opt/hotfix-vllm-issue237-toolcall-directive.py --check"
+  if [ "$DSPARK_TP3" = "1" ]; then
+    echo "Checking Issue #237 toolcall directive compatibility on worker2 before ranks start..."
+    remote_compose2 "NODE_RANK=2 HEADLESS=1 $WORKER2_HF_COMPOSE_ENV VLLM_HOST_IP='$WORKER2_VLLM_HOST_IP' GPU_MEMORY_UTILIZATION='$GPU_MEMORY_UTILIZATION' DSPARK_MODEL='$DSPARK_MODEL' DSPARK_REVISION='${DSPARK_REVISION:-}' ENABLE_VLLM_GB10_PATCH='$ENABLE_VLLM_GB10_PATCH' VLLM_GB10_PATCH_DIR='./vllm_patch_gb10' GB10_HYBRID_NVFP4_M_THRESHOLD='${GB10_HYBRID_NVFP4_M_THRESHOLD:-128}' docker compose -p '$PROJECT_NAME' --env-file .env.dspark $WORKER2_COMPOSE_FILES run --rm --no-deps --entrypoint python3 vllm-dspark /opt/hotfix-vllm-issue237-toolcall-directive.py --check"
+  fi
+  echo "Checking Issue #237 toolcall directive compatibility on the head before either rank starts..."
+  compose_base 0 "" run --rm --no-deps --entrypoint python3 vllm-dspark /opt/hotfix-vllm-issue237-toolcall-directive.py --check
+fi
+if [ "${DSPARK_ENABLE_ISSUE237_CIRCUIT_BREAKER:-0}" = "1" ]; then
+  echo "Checking Issue #237 circuit breaker compatibility on the worker before either rank starts..."
+  remote_compose "NODE_RANK=1 HEADLESS=1 $WORKER_HF_COMPOSE_ENV VLLM_HOST_IP='$WORKER_VLLM_HOST_IP' GPU_MEMORY_UTILIZATION='$GPU_MEMORY_UTILIZATION' DSPARK_MODEL='$DSPARK_MODEL' DSPARK_REVISION='${DSPARK_REVISION:-}' ENABLE_VLLM_GB10_PATCH='$ENABLE_VLLM_GB10_PATCH' VLLM_GB10_PATCH_DIR='./vllm_patch_gb10' GB10_HYBRID_NVFP4_M_THRESHOLD='${GB10_HYBRID_NVFP4_M_THRESHOLD:-128}' docker compose -p '$PROJECT_NAME' --env-file .env.dspark $WORKER_COMPOSE_FILES run --rm --no-deps --entrypoint python3 vllm-dspark /opt/hotfix-vllm-issue237-circuit-breaker.py --check"
+  if [ "$DSPARK_TP3" = "1" ]; then
+    echo "Checking Issue #237 circuit breaker compatibility on worker2 before ranks start..."
+    remote_compose2 "NODE_RANK=2 HEADLESS=1 $WORKER2_HF_COMPOSE_ENV VLLM_HOST_IP='$WORKER2_VLLM_HOST_IP' GPU_MEMORY_UTILIZATION='$GPU_MEMORY_UTILIZATION' DSPARK_MODEL='$DSPARK_MODEL' DSPARK_REVISION='${DSPARK_REVISION:-}' ENABLE_VLLM_GB10_PATCH='$ENABLE_VLLM_GB10_PATCH' VLLM_GB10_PATCH_DIR='./vllm_patch_gb10' GB10_HYBRID_NVFP4_M_THRESHOLD='${GB10_HYBRID_NVFP4_M_THRESHOLD:-128}' docker compose -p '$PROJECT_NAME' --env-file .env.dspark $WORKER2_COMPOSE_FILES run --rm --no-deps --entrypoint python3 vllm-dspark /opt/hotfix-vllm-issue237-circuit-breaker.py --check"
+  fi
+  echo "Checking Issue #237 circuit breaker compatibility on the head before either rank starts..."
+  compose_base 0 "" run --rm --no-deps --entrypoint python3 vllm-dspark /opt/hotfix-vllm-issue237-circuit-breaker.py --check
+fi
 if [ "${DSPARK_ENABLE_MXFP4_INDEXER_CACHE:-0}" = "1" ]; then
   echo "Checking MXFP4 indexer K cache compatibility on the worker before either rank starts..."
   remote_compose "NODE_RANK=1 HEADLESS=1 $WORKER_HF_COMPOSE_ENV VLLM_HOST_IP='$WORKER_VLLM_HOST_IP' GPU_MEMORY_UTILIZATION='$GPU_MEMORY_UTILIZATION' DSPARK_MODEL='$DSPARK_MODEL' DSPARK_REVISION='${DSPARK_REVISION:-}' ENABLE_VLLM_GB10_PATCH='$ENABLE_VLLM_GB10_PATCH' VLLM_GB10_PATCH_DIR='./vllm_patch_gb10' GB10_HYBRID_NVFP4_M_THRESHOLD='${GB10_HYBRID_NVFP4_M_THRESHOLD:-128}' docker compose -p '$PROJECT_NAME' --env-file .env.dspark $WORKER_COMPOSE_FILES run --rm --no-deps --entrypoint python3 vllm-dspark /opt/hotfix-vllm-mxfp4-indexer-cache.py --check"

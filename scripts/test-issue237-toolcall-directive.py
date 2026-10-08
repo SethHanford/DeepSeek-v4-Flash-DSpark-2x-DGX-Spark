@@ -206,6 +206,12 @@ class Wiring(unittest.TestCase):
             'dscp "$DSPARK_ISSUE237_TOOLCALL_DIRECTIVE_HOTFIX" "${WORKER_HOST}:${REMOTE_WORKER_DIR}/patches/hotfix-vllm-issue237-toolcall-directive.py"',
             start,
         )
+        # The toolcall directive must get the same --check preflight as the
+        # other issue237 hotfixes, on worker, worker2 (when TP3), and head.
+        self.assertIn(
+            "python3 vllm-dspark /opt/hotfix-vllm-issue237-toolcall-directive.py --check",
+            start,
+        )
 
     def test_env_example_and_ci(self):
         env = ENV_EXAMPLE.read_text()

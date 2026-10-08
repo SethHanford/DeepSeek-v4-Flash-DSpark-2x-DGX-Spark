@@ -1121,9 +1121,9 @@ engine (`await self.engine_client.abort(request_id)`) so generation stops
 immediately, and forces `finish_reason` to "stop" so the client sees a clean
 termination. The engine abort is what actually halts generation; the
 `finish_reason` mutation alone would leave the engine burning tokens in the
-background. The paragraph and line detectors are the sole trip triggers; the
-"Let me" and stuck/restart phrase counters are logged as metrics only (too noisy
-to trip on). `DSPARK_ISSUE237_CIRCUIT_BREAKER_LOG=1` (default) emits one
+background. The paragraph and line detectors are the sole trip triggers. On a
+trip, the log line reports the observed count against the threshold (e.g.
+`paragraphs=12/10 lines=3/10`). `DSPARK_ISSUE237_CIRCUIT_BREAKER_LOG=1` (default) emits one
 `[dspark-issue237-circuit-breaker]` line per trip; `0` silences it. The log
 defaults on so that enabling the breaker shows why a run was aborted. Detection
 is fail-open; the intervention is deterministic.

@@ -73,6 +73,10 @@ IMPORT_NEW = (
     "import os as _os\n"
     "_MIN_REPETITION_PENALTY = float(_os.environ.get(\"DSPARK_ISSUE237_REPETITION_PENALTY\", \"1.05\"))\n"
     "\n"
+    "def _issue237_resolve_rep_penalty(rep: float) -> float:\n"
+    "    \"\"\"Raise a no-op/absent repetition penalty to the configured minimum.\"\"\"\n"
+    "    return _MIN_REPETITION_PENALTY if rep <= 1.0 else rep\n"
+    "\n"
     "\n"
     "class PenaltiesState:\n"
 )
@@ -96,9 +100,7 @@ REGION_NEW = (
     "        # repetition penalty so a client that leaves the default (1.0 = no\n"
     "        # penalty) still gets a penalty. This prevents the token-repetition\n"
     "        # loop seen at large context sizes in chat mode.\n"
-    "        _rep = sampling_params.repetition_penalty\n"
-    "        if _rep <= 1.0:\n"
-    "            _rep = _MIN_REPETITION_PENALTY\n"
+    "        _rep = _issue237_resolve_rep_penalty(sampling_params.repetition_penalty)\n"
     "        self.repetition_penalty.np[req_idx] = _rep\n"
     "        self.frequency_penalty.np[req_idx] = sampling_params.frequency_penalty\n"
     "        self.presence_penalty.np[req_idx] = sampling_params.presence_penalty\n"
@@ -111,9 +113,9 @@ REGION_NEW = (
 
 # Self-pins: the region constants must not drift inside this file.
 IMPORT_OLD_SHA256 = "9476c8abaaf835b1b6a445d03ec67868550ceefab8123b46339267e322f71ab0"
-IMPORT_NEW_SHA256 = "7f602214db50a51426a0b846ee0b687542f84854c99c2dfae282f3b241dac119"
+IMPORT_NEW_SHA256 = "ec58050cf002cd2e64d87ce0c538d771e1785f0d53c38abed83235a0da385b48"
 REGION_OLD_SHA256 = "c09dd07820c6c58d85cf8a938a203188080dae16172c1cdbb97cca9b12714702"
-REGION_NEW_SHA256 = "397079380d5ad5ed95ae8fdac7abedd75219972c9dc073592f66798bb6508ace"
+REGION_NEW_SHA256 = "8cd30d5249fb4ccc1a7dc0aece3e29c5539bea54a50d1cdf46c8bae99c837e5f"
 
 
 class HotfixError(RuntimeError):
@@ -196,22 +198,23 @@ def _self_check(patched_src: bytes) -> tuple[bool, str]:
             stock = _load(stock_src, "pen_stock_i237")
             patched = _load(patched_src, "pen_patched_i237")
 
-            class _SP:
-                def __init__(self, rep, freq=0.0, pres=0.0):
-                    self.repetition_penalty = rep
-                    self.frequency_penalty = freq
-                    self.presence_penalty = pres
+            # The clamp helper must exist in the patched module and not in stock.
+            if not hasattr(patched, "_issue237_resolve_rep_penalty"):
+                return False, "clamp helper missing in patched module"
+            if hasattr(stock, "_issue237_resolve_rep_penalty"):
+                return False, "clamp helper unexpectedly present in stock module"
 
-            # A client that leaves the default (1.0) must be clamped and marked.
-            sp = _SP(1.0)
-            if stock.use_penalty(sp):
-                return False, "stock use_penalty(1.0) unexpectedly True"
-            if not patched.use_penalty(_SP(patched._MIN_REPETITION_PENALTY)):
-                return False, "patched use_penalty(min) unexpectedly False"
+            # A client that leaves the default (1.0) must be clamped to the minimum.
+            if patched._issue237_resolve_rep_penalty(1.0) != patched._MIN_REPETITION_PENALTY:
+                return False, "default penalty (1.0) was not clamped to the minimum"
 
             # A client that sets a penalty > 1.0 must be left untouched.
-            if patched.use_penalty(_SP(1.2)) is not True:
-                return False, "patched use_penalty(1.2) unexpectedly not True"
+            if patched._issue237_resolve_rep_penalty(1.2) != 1.2:
+                return False, "explicit penalty > 1.0 was modified"
+
+            # A client that sets a penalty < 1.0 (a repetition bonus) must be clamped.
+            if patched._issue237_resolve_rep_penalty(0.9) != patched._MIN_REPETITION_PENALTY:
+                return False, "sub-1.0 penalty was not clamped to the minimum"
 
             # The clamp value must be the configured minimum.
             if not (patched._MIN_REPETITION_PENALTY > 1.0):

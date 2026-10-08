@@ -88,29 +88,77 @@ and `finish_reason` is not "tool_calls". The model, still expecting to make a to
 call, re-narrates the preamble and loops.
 
 ## Revised conclusion
-The repetition penalty is a **partial mitigation, not a complete fix**. It reduces
-the rigidity of the loop but does not address the underlying cause: the model falls
-into a **behavioral planning loop** where it narrates an action it intends to take
-but never emits the tool-call DSML structure. The model keeps leading into a tool
-call that never materializes.
+The loop's root cause is a **behavioral planning loop**: the model narrates an
+action it intends to take but never emits the tool-call DSML structure, so the
+planned action never materializes and the model re-narrates. The implemented
+mitigation combines a **repetition penalty** (suppresses the repeated preamble)
+with a **circuit breaker** (aborts the request when near-duplicate paragraphs or
+lines recur). Making the model actually emit the tool-call DSML structure
+(tool-call emission) is a known limitation that this fix does not address.
 
 ## Proposed fix (revised)
 1. **Repetition penalty** (implemented) — suppresses repeated preamble, partial
    mitigation.
-2. **Tool-call emission** — ensure the model emits the tool-call DSML structure
-   when it starts narrating an action (better tool-call prompting/guidance), so the
-   planned action actually leads to a tool call.
-3. **Loop-breaking on narration-without-call** — detect the repeated "Let me"
-   preamble and force a different response when the model narrates without emitting
-   a tool call.
+2. **Loop-breaking on narration-without-call** (implemented) — a circuit breaker
+   detects near-duplicate recent paragraphs or lines and aborts the request at the
+   engine, forcing `finish_reason` to "stop" when the model narrates without
+   emitting a tool call.
 
 ## Artifacts preserved
 - `sitecustomize-loaded-after-serve2.jsonl` — the baseline loop capture (no penalty).
 - `issue237_capture_A_penalty_on.jsonl` — the Config A capture (penalty 1.05), still loops.
 - `scripts/analyze-issue237-capture.py` — repetition detector.
 - `scripts/analyze-issue237-fresh.py` — refined loop detector (flags genuine loops only).
-- `scripts/instrument-generation-issue237.py` — sitecustomize token logger.
 - `patches/sitecustomize.py` — the instrumentation deployed as sitecustomize.
 - `scripts/diag-issue237-encode-compare.py` — encoder comparison diagnostic.
 - `scripts/instrument-issue237.py` — earlier encoder instrumentation.
 - `issue237_capture.jsonl` — earlier encoder-level capture.
+
+## Loop patterns observed
+
+Concrete loop shapes seen in the wild, used as test cases for a detector that
+must catch them **without matching on language** (the model is multilingual, so
+English phrase matching is not viable). Each pattern is a distinct failure mode
+that a detector should trip on.
+
+1. **Single-line echo loop** — the model regurgitates one source line over and
+   over, separated by single newlines (the 47k-token `_stub(...)` loop). The
+   lines are byte-identical. Caught by the line detector (exact match); missed
+   by the paragraph detector because a single line never forms a complete
+   paragraph.
+
+   ```
+       _stub("vllm.entrypoints.openai.tool_parsers.tool_parsers_utils")
+       _stub("vllm.entrypoints.openai.tool_parsers.tool_parsers_utils")
+       _stub("vllm.entrypoints.openai.tool_parsers.tool_parsers_utils")
+   ```
+
+2. **Short-phrase narration loop** — the model cycles through 2-3 short,
+   non-identical "let me" statements repeatedly (observed in a session that ran
+   for hours before being terminated). The statements are near-duplicate but
+   not byte-identical, so exact match misses them; they are too short for the
+   paragraph detector's token-set similarity to distinguish from legitimate
+   near-duplicate prose.
+
+   ```
+   Let me check the API key.
+   Let me get the API key from the container.
+   Let me check the API key again.
+   Let me check the API key.
+   Let me get the API key from the container.
+   ```
+
+3. **Repetitive "Let me..." preamble chain** — the model opens successive
+   turns with a short "Let me ..." preamble that repeats in structure even when
+   the rest of the turn differs. The preamble alone is a loop signal.
+
+   ```
+   Let me check the imports of the serving.py fixture to gauge stub complexity.
+   Let me look at the top imports of the serving fixture.
+   Let me check the serving.py fixture imports.
+   Let me view the imports of the serving fixture.
+   ```
+
+These three shapes are the acceptance cases for any future loop detector. The
+current paragraph and line detectors cover shape 1 only; shapes 2 and 3 are
+open gaps.

@@ -19,9 +19,9 @@ near-duplicate paragraph pairs exceeds a threshold, it forces the generation
 to stop (sets ``finish_reason`` to "stop") so the loop is broken
 deterministically, rather than relying on the model to follow an instruction.
 
-The paragraph detector is the sole trip trigger. The "Let me" phrase counter
-and the stuck/restart phrase counter are computed and logged as metrics only
-(they are too noisy to trip on, since "let me" is common in legitimate prose).
+The paragraph and line detectors are the sole trip triggers. On a trip, a
+single log line reports the observed count against the threshold (e.g.
+``paragraphs=12/10 lines=3/10``).
 
 The detection is fail-open (a detection error does not break the normal
 streaming path), but the intervention is deterministic.
@@ -75,84 +75,38 @@ HELPER_NEW = (
     "        import sys as _sys\n"
     "        print(f\"[dspark-issue237-circuit-breaker] {msg}\", file=_sys.stderr, flush=True)\n"
     "\n"
-    "def _issue237_count_loop_phrases(text: str) -> int:\n"
-    "    \"\"\"Count occurrences of the agentic narration loop phrases.\"\"\"\n"
-    "    import re as _re\n"
-    "    if not text:\n"
-    "        return 0\n"
-    "    # Match \"Let me\", \"Wait, let me\", \"Actually, let me\", and variants.\n"
-    "    # Word boundaries avoid matching \"let me\" inside words like \"outlet\"\n"
-    "    # or \"tablet\". Case-insensitive; count each occurrence.\n"
-    "    return len(_re.findall(r\"(?i)(?:\\blet me\\b|\\bwait[,.]?\\s+let me\\b|\\bactually[,.]?\\s+let me\\b)\", text))\n"
+    "def _issue237_loop_score(text: str, key: object, state: dict, split, normalize, is_hit, min_len: int) -> int:\n"
+    "    \"\"\"Generic sliding-window loop detector (stateful per request).\n"
     "\n"
-    "def _issue237_count_stuck_phrases(text: str) -> int:\n"
-    "    \"\"\"Count self-acknowledged stuck/restart phrases.\n"
-    "\n"
-    "    Catches the response-restart loop style where the model admits it is\n"
-    "    looping and restarts (\"I'm looping again. Let me stop and...\") but the\n"
-    "    paragraphs are otherwise distinct, so the paragraph detector misses it.\n"
+    "    Split the accumulated text into units with ``split``, normalize each\n"
+    "    completed unit with ``normalize``, and flag a unit as a repeat when\n"
+    "    ``is_hit`` matches it against the recent window. A hit increments a\n"
+    "    counter that resets after 6 consecutive misses (the loop broke).\n"
+    "    Returns the current hit count. State is keyed by ``key`` (the request\n"
+    "    id) so concurrent requests do not interfere.\n"
     "    \"\"\"\n"
-    "    import re as _re\n"
-    "    if not text:\n"
-    "        return 0\n"
-    "    _t = text.lower()\n"
-    "    _patterns = [\n"
-    "        r\"\\bi['’]?m looping\\b\", r\"\\bi am looping\\b\", r\"\\bi keep looping\\b\",\n"
-    "        r\"\\bi['’]?m stuck\\b\", r\"\\bi am stuck\\b\", r\"\\bi am going in circles\\b\",\n"
-    "        r\"\\bi keep repeating\\b\", r\"\\bi am repeating myself\\b\",\n"
-    "        r\"\\blet me stop\\b\", r\"\\blet me take a step back\\b\", r\"\\blet me step back\\b\",\n"
-    "        r\"\\blet me restart\\b\", r\"\\blet me start over\\b\", r\"\\blet me begin again\\b\",\n"
-    "        r\"\\blet me try again\\b\", r\"\\blet me redo\\b\", r\"\\blet me re-examine\\b\",\n"
-    "        r\"\\blet me revisit\\b\", r\"\\blet me make a plan\\b\", r\"\\blet me outline a plan\\b\",\n"
-    "        r\"\\blet me check in\\b\", r\"\\blet me report back\\b\", r\"\\blet me pause\\b\",\n"
-    "        r\"\\blet me regroup\\b\", r\"\\blet me reset\\b\", r\"\\blet me hold on\\b\",\n"
-    "    ]\n"
-    "    return sum(len(_re.findall(_p, _t)) for _p in _patterns)\n"
-    "\n"
-    "def _issue237_paragraph_loop_score(text: str, key: object) -> int:\n"
-    "    \"\"\"Sliding-window paragraph loop detector (stateful per request).\n"
-    "\n"
-    "    Split the accumulated text into paragraphs on blank lines. Keep a\n"
-    "    backward window of the last K paragraph token-sets. When a new\n"
-    "    paragraph completes, compare it against the window; a near-identical\n"
-    "    match (small symmetric difference) increments a hit counter. The\n"
-    "    counter resets after K consecutive misses (the loop broke). Returns\n"
-    "    the current hit count. State is keyed by ``key`` (the request id) so\n"
-    "    concurrent requests do not interfere.\n"
-    "    \"\"\"\n"
-    "    import re as _re\n"
     "    from collections import deque\n"
     "    if not text:\n"
     "        return 0\n"
-    "    st = _issue237_para_state.setdefault(\n"
-    "        key, {\"window\": deque(maxlen=6), \"hits\": 0, \"misses\": 0, \"pos\": 0, \"tripped\": False}\n"
+    "    st = state.setdefault(\n"
+    "        key, {\"window\": deque(maxlen=6), \"hits\": 0, \"misses\": 0, \"pos\": 0}\n"
     "    )\n"
     "    # Only process text appended since the last call; ``pos`` is an absolute\n"
     "    # offset into the monotonically-growing accumulated text.\n"
     "    new = text[st[\"pos\"]:]\n"
     "    if not new:\n"
     "        return st[\"hits\"]\n"
-    "    parts = _re.split(r\"\\n\\s*\\n\", new)\n"
-    "    # The last element may be a partial paragraph (no trailing blank line yet).\n"
+    "    parts = split(new)\n"
+    "    # The last element may be a partial unit (no trailing delimiter yet).\n"
     "    complete = parts[:-1] if len(parts) > 1 else []\n"
     "    if not complete:\n"
     "        return st[\"hits\"]\n"
     "    st[\"pos\"] += len(new) - len(parts[-1])\n"
-    "    for _p in complete:\n"
-    "        _toks = set(_re.findall(r\"[a-z0-9]+\", _p.lower()))\n"
-    "        if len(_toks) < 8:\n"
+    "    for _unit in complete:\n"
+    "        _norm = normalize(_unit)\n"
+    "        if len(_norm) < min_len:\n"
     "            continue\n"
-    "        _hit = False\n"
-    "        for _sig in st[\"window\"]:\n"
-    "            _union = _toks | _sig\n"
-    "            if not _union:\n"
-    "                continue\n"
-    "            _inter = _toks & _sig\n"
-    "            # Near-identical if the symmetric difference is a small fraction\n"
-    "            # of the union (<= 35%).\n"
-    "            if (len(_union) - len(_inter)) / len(_union) <= 0.35:\n"
-    "                _hit = True\n"
-    "                break\n"
+    "        _hit = is_hit(_norm, st[\"window\"])\n"
     "        if _hit:\n"
     "            st[\"hits\"] += 1\n"
     "            st[\"misses\"] = 0\n"
@@ -160,8 +114,33 @@ HELPER_NEW = (
     "            st[\"misses\"] += 1\n"
     "            if st[\"misses\"] >= 6:\n"
     "                st[\"hits\"] = 0\n"
-    "        st[\"window\"].append(_toks)\n"
+    "        st[\"window\"].append(_norm)\n"
     "    return st[\"hits\"]\n"
+    "\n"
+    "def _issue237_paragraph_loop_score(text: str, key: object) -> int:\n"
+    "    \"\"\"Sliding-window paragraph loop detector (stateful per request).\n"
+    "\n"
+    "    Splits on blank lines and compares each completed paragraph's token-set\n"
+    "    against the recent window; a near-identical match (small symmetric\n"
+    "    difference) counts as a repeat.\n"
+    "    \"\"\"\n"
+    "    import re as _re\n"
+    "    def _split(t):\n"
+    "        return _re.split(r\"\\n\\s*\\n\", t)\n"
+    "    def _normalize(p):\n"
+    "        return set(_re.findall(r\"[a-z0-9]+\", p.lower()))\n"
+    "    def _is_hit(toks, window):\n"
+    "        for sig in window:\n"
+    "            union = toks | sig\n"
+    "            if not union:\n"
+    "                continue\n"
+    "            inter = toks & sig\n"
+    "            # Near-identical if the symmetric difference is a small fraction\n"
+    "            # of the union (<= 35%).\n"
+    "            if (len(union) - len(inter)) / len(union) <= 0.35:\n"
+    "                return True\n"
+    "        return False\n"
+    "    return _issue237_loop_score(text, key, _issue237_paragraph_state, _split, _normalize, _is_hit, 8)\n"
     "\n"
     "def _issue237_paragraph_loop_threshold() -> int:\n"
     "    import os as _os\n"
@@ -177,38 +156,15 @@ HELPER_NEW = (
     "    single line separated by newlines (e.g. the model echoing one source\n"
     "    line over and over) never forms a complete paragraph and is missed.\n"
     "    This detector splits on newlines and flags a line that repeats a recent\n"
-    "    line in the window. State is keyed by ``key`` (the request id) so\n"
-    "    concurrent requests do not interfere.\n"
+    "    line in the window.\n"
     "    \"\"\"\n"
-    "    from collections import deque\n"
-    "    if not text:\n"
-    "        return 0\n"
-    "    st = _issue237_line_state.setdefault(\n"
-    "        key, {\"window\": deque(maxlen=6), \"hits\": 0, \"misses\": 0, \"pos\": 0}\n"
-    "    )\n"
-    "    new = text[st[\"pos\"]:]\n"
-    "    if not new:\n"
-    "        return st[\"hits\"]\n"
-    "    parts = new.split(\"\\n\")\n"
-    "    # The last element may be a partial line (no trailing newline yet).\n"
-    "    complete = parts[:-1] if len(parts) > 1 else []\n"
-    "    if not complete:\n"
-    "        return st[\"hits\"]\n"
-    "    st[\"pos\"] += len(new) - len(parts[-1])\n"
-    "    for _line in complete:\n"
-    "        _s = _line.strip()\n"
-    "        if len(_s) < 8:\n"
-    "            continue\n"
-    "        _hit = _s in st[\"window\"]\n"
-    "        if _hit:\n"
-    "            st[\"hits\"] += 1\n"
-    "            st[\"misses\"] = 0\n"
-    "        else:\n"
-    "            st[\"misses\"] += 1\n"
-    "            if st[\"misses\"] >= 6:\n"
-    "                st[\"hits\"] = 0\n"
-    "        st[\"window\"].append(_s)\n"
-    "    return st[\"hits\"]\n"
+    "    def _split(t):\n"
+    "        return t.split(\"\\n\")\n"
+    "    def _normalize(line):\n"
+    "        return line.strip()\n"
+    "    def _is_hit(s, window):\n"
+    "        return s in window\n"
+    "    return _issue237_loop_score(text, key, _issue237_line_state, _split, _normalize, _is_hit, 8)\n"
     "\n"
     "def _issue237_line_loop_threshold() -> int:\n"
     "    import os as _os\n"
@@ -217,7 +173,7 @@ HELPER_NEW = (
     "    except ValueError:\n"
     "        return 10\n"
     "\n"
-    "_issue237_para_state = {}\n"
+    "_issue237_paragraph_state = {}\n"
     "_issue237_line_state = {}\n"
 )
 
@@ -228,30 +184,26 @@ REGION_NEW = (
     "                    previous_texts[i] += delta_text\n"
     "                    # [dspark-issue237-circuit-breaker] Deterministic circuit\n"
     "                    # breaker for the agentic narration loop. The paragraph\n"
-    "                    # detector is the sole trip trigger: it fires only on\n"
-    "                    # near-duplicate recent paragraphs, which is the reliable\n"
-    "                    # loop signal. The 'Let me' phrase counter and the\n"
-    "                    # stuck/restart phrase counter are logged as metrics only\n"
-    "                    # (they are too noisy to trip on, since 'let me' is common\n"
-    "                    # in legitimate prose). Log a single line per trip (gated\n"
-    "                    # by DSPARK_ISSUE237_CIRCUIT_BREAKER_LOG). Fail-open on\n"
+    "                    # and line detectors are the sole trip triggers: they fire\n"
+    "                    # only on near-duplicate recent paragraphs or repeated\n"
+    "                    # lines, which is the reliable loop signal. Log a single\n"
+    "                    # line per trip (gated by\n"
+    "                    # DSPARK_ISSUE237_CIRCUIT_BREAKER_LOG) reporting the\n"
+    "                    # observed count against the threshold. Fail-open on\n"
     "                    # error.\n"
     "                    if _issue237_circuit_breaker_enabled():\n"
     "                        try:\n"
     "                            _txt = previous_texts[i]\n"
-    "                            _count = _issue237_count_loop_phrases(_txt)\n"
-    "                            _stuck = _issue237_count_stuck_phrases(_txt)\n"
-    "                            _para = _issue237_paragraph_loop_score(_txt, id(request))\n"
+    "                            _para = _issue237_paragraph_loop_score(_txt, request_id)\n"
     "                            _pthr = _issue237_paragraph_loop_threshold()\n"
-    "                            _line = _issue237_line_loop_score(_txt, id(request))\n"
+    "                            _line = _issue237_line_loop_score(_txt, request_id)\n"
     "                            _lthr = _issue237_line_loop_threshold()\n"
     "                            if _para >= _pthr or _line >= _lthr:\n"
-    "                                if not _issue237_para_state[id(request)].get(\"tripped\"):\n"
-    "                                    _issue237_para_state[id(request)][\"tripped\"] = True\n"
+    "                                if not _issue237_paragraph_state[request_id].get(\"tripped\"):\n"
+    "                                    _issue237_paragraph_state[request_id][\"tripped\"] = True\n"
     "                                    _issue237_circuit_breaker_log(\n"
     "                                        f\"trip paragraphs={_para}/{_pthr} \"\n"
-    "                                        f\"lines={_line}/{_lthr} \"\n"
-    "                                        f\"(phrases={_count} stuck={_stuck})\"\n"
+    "                                        f\"lines={_line}/{_lthr}\"\n"
     "                                    )\n"
     "                                    # Abort the request at the engine so\n"
     "                                    # generation stops immediately instead of\n"
@@ -269,7 +221,7 @@ REGION_NEW = (
 
 # Self-pins: the region constant must not drift inside this file.
 REGION_OLD_SHA256 = "94de98ec8d8311897767cd54de6b1119a5944eae3b9c0328639e66ae1630913d"
-REGION_NEW_SHA256 = "29f2bcd7ef6221b8e795977ffaa1228181259cd2ed91a8cb7a05742c8b1caac7"
+REGION_NEW_SHA256 = "b85e2583e710ce74ed8d4799daf8e9ec2857bb8f363c0c3f03f6e9e44a55e48e"
 
 
 def _sha256(data: bytes) -> str:
@@ -328,8 +280,61 @@ def transform(stock: bytes) -> bytes:
     return patched
 
 
+def _issue237_verify_detectors(
+    para, line, para_threshold, line_threshold
+) -> tuple[bool, str]:
+    """Behavioral proof that the loop detectors trip on a loop and stay quiet
+    on distinct prose. Returns (ok, why)."""
+    def _feed(score, units, key):
+        # Grow the accumulated text one unit at a time, as the streaming path
+        # does, so the stateful pos/window advance and the detector sees the
+        # full sequence of units.
+        text = ""
+        for u in units:
+            text += u
+            score(text, key)
+        return score(text, key)
+
+    repeated_para = "The API key rotation failed and the token loop continued indefinitely.\n\n"
+    if _feed(para, [repeated_para] * 12, "sc-para-repeat") < 10:
+        return False, "paragraph detector did not trip on repeated paragraphs"
+
+    distinct_para = [
+        p + "\n\n"
+        for p in [
+            "Quantum computing leverages superposition and entanglement for computation.",
+            "The weather forecast predicts rain showers across the coastal region tomorrow.",
+            "Baking sourdough bread requires patience, hydration, and a warm kitchen.",
+            "Mountain biking trails wind through pine forests and rocky switchbacks.",
+        ]
+    ]
+    if _feed(para, distinct_para, "sc-para-distinct") != 0:
+        return False, "paragraph detector false-positived on distinct paragraphs"
+
+    repeated_line = '    _stub("vllm.entrypoints.openai.tool_parsers.tool_parsers_utils")\n'
+    if _feed(line, [repeated_line] * 12, "sc-line-repeat") < 10:
+        return False, "line detector did not trip on repeated lines"
+
+    distinct_line = [
+        f"This is distinct line number {i} about a different topic entirely.\n"
+        for i in range(5)
+    ]
+    if _feed(line, distinct_line, "sc-line-distinct") != 0:
+        return False, "line detector false-positived on distinct lines"
+
+    # Thresholds must resolve to sane defaults.
+    if para_threshold() < 1:
+        return False, "paragraph loop threshold not sane"
+    if line_threshold() < 1:
+        return False, "line loop threshold not sane"
+
+    return True, "detectors trip on loops and ignore distinct prose"
+
+
 def _self_check(patched_src: bytes) -> tuple[bool, str]:
-    """Behavioral proof: the circuit breaker helpers are present and the module compiles."""
+    """Behavioral proof: the circuit breaker helpers are present, the module
+    compiles, and the loop detectors actually trip on repeated input while
+    staying quiet on distinct prose."""
     import importlib.util
 
     stock_src = patched_src.replace(REGION_NEW.encode(), REGION_OLD.encode(), 1)
@@ -352,8 +357,6 @@ def _self_check(patched_src: bytes) -> tuple[bool, str]:
             # The circuit breaker helpers must be present in the patched module
             if not hasattr(patched, "_issue237_circuit_breaker_enabled"):
                 return False, "circuit breaker helper missing in patched module"
-            if not hasattr(patched, "_issue237_count_loop_phrases"):
-                return False, "loop phrase counter missing in patched module"
             if not hasattr(patched, "_issue237_paragraph_loop_score"):
                 return False, "paragraph loop scorer missing in patched module"
             if not hasattr(patched, "_issue237_paragraph_loop_threshold"):
@@ -366,20 +369,27 @@ def _self_check(patched_src: bytes) -> tuple[bool, str]:
                 return False, "circuit breaker log helper missing in patched module"
             if not hasattr(patched, "_issue237_circuit_breaker_log"):
                 return False, "circuit breaker log emitter missing in patched module"
-            if not hasattr(patched, "_issue237_count_stuck_phrases"):
-                return False, "stuck phrase counter missing in patched module"
             # The stock module must NOT have the helpers
             if hasattr(stock, "_issue237_circuit_breaker_enabled"):
                 return False, "circuit breaker helper unexpectedly present in stock module"
             if hasattr(stock, "_issue237_paragraph_loop_score"):
                 return False, "paragraph loop scorer unexpectedly present in stock module"
-            if hasattr(stock, "_issue237_count_stuck_phrases"):
-                return False, "stuck phrase counter unexpectedly present in stock module"
+
+            # Behavioral proof: the detectors must actually trip on a loop and
+            # stay quiet on distinct prose.
+            ok, why = _issue237_verify_detectors(
+                patched._issue237_paragraph_loop_score,
+                patched._issue237_line_loop_score,
+                patched._issue237_paragraph_loop_threshold,
+                patched._issue237_line_loop_threshold,
+            )
+            if not ok:
+                return False, why
         except HotfixError:
             raise
         except Exception as err:  # broken/unimportable patch must fail closed
             return False, f"self-check raised {type(err).__name__}: {err}"
-    return True, "circuit breaker helpers verified; stock module unchanged"
+    return True, "circuit breaker helpers verified; detectors trip on loops and ignore distinct prose"
 
 
 def apply(target: Path) -> str:
