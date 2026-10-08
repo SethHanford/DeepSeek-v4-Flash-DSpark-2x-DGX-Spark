@@ -68,8 +68,10 @@ def _install_stubs():
 
     torch = stub("torch")
     torch.jit = types.SimpleNamespace(script=lambda f: f, script_if_tracing=lambda f: f)
+    torch.Tensor = type("Tensor", (), {})
     torch.float32 = "float32"
     torch.float16 = "float16"
+    torch.int32 = "int32"
     torch.int64 = "int64"
     torch.bool = "bool"
     torch.zeros = lambda *a, **k: None
