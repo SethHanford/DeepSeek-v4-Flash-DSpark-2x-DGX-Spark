@@ -1124,13 +1124,15 @@ termination. The engine abort is what actually halts generation; the
 background. The paragraph and line detectors are the sole trip triggers; the
 "Let me" and stuck/restart phrase counters are logged as metrics only (too noisy
 to trip on). `DSPARK_ISSUE237_CIRCUIT_BREAKER_LOG=1` (default) emits one
-`[dspark-issue237-circuit-breaker]` line per trip; `0` silences it. Detection is
-fail-open; the intervention is deterministic.
+`[dspark-issue237-circuit-breaker]` line per trip; `0` silences it. The log
+defaults on so that enabling the breaker shows why a run was aborted. Detection
+is fail-open; the intervention is deterministic.
 
 **Generation logging** (`DSPARK_ENABLE_ISSUE237_LOGGING`) installs a sitecustomize
 token logger that writes one JSON record per generated token to
-`/tmp/issue237_gen_capture.jsonl`. The capture contains raw token IDs that decode
-to session text (usernames, hostnames, paths); never commit it.
+`/tmp/issue237_gen_capture.jsonl`. **DEBUG only**: enable for a one-off capture,
+not steady-state. The capture contains raw token IDs that decode to session text
+(usernames, hostnames, paths); never commit it.
 
 All three patchers are source-exact, anchored, sha256-pinned, and fail-closed
 (`--status`/`--check`/`--self-check`, byte-restore on failure). CPU suites
