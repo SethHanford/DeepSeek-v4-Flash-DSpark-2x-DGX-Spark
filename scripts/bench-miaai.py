@@ -7,10 +7,18 @@ read separately.  Usage: bench_miaai.py --base-url ... --prompt 256 --concurrenc
 """
 import argparse, asyncio, json, statistics, time, urllib.error, urllib.request
 
+API_KEY = ""
+
+def _headers():
+    h = {"Content-Type": "application/json"}
+    if API_KEY:
+        h["Authorization"] = f"Bearer {API_KEY}"
+    return h
+
 def request_json(url, body):
     for attempt in range(4):
         req = urllib.request.Request(url, data=json.dumps(body).encode(),
-                                     headers={"Content-Type": "application/json"})
+                                     headers=_headers())
         try:
             with urllib.request.urlopen(req, timeout=3600) as resp:
                 return json.load(resp)
@@ -42,7 +50,7 @@ def stream_one(base_url, model, prompt):
         "chat_template_kwargs": {"thinking": False},
     }
     req = urllib.request.Request(f"{base_url}/chat/completions", data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json"})
+                                 headers=_headers())
     started = time.perf_counter()
     first = None
     usage = None
@@ -91,7 +99,10 @@ async def main():
     ap.add_argument("--prompt", type=int, default=256)
     ap.add_argument("--concurrency", type=int, default=1)
     ap.add_argument("--repeat", type=int, default=5, help="how many sequential trials (unique nonces)")
+    ap.add_argument("--api-key", default="", help="Bearer token for the OpenAI endpoint (optional)")
     args = ap.parse_args()
+    global API_KEY
+    API_KEY = args.api_key
     rows = []
     for rep in range(args.repeat):
         case = await run_case(args.base_url, args.model, args.prompt, args.concurrency, rep)

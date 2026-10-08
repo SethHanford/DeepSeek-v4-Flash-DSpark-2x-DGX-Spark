@@ -3,13 +3,21 @@
 Forces cold prefill (unique nonce), pads system prompt to target length,
 then: single tool call, multi-turn (call->result->answer), parallel calls,
 and the issue55 truncation case. Verifies valid JSON + no garble at depth.
-Usage: deepctx_tool_battery.py [base_url] [model] [lengths 32768 131072]
+Usage: deepctx_tool_battery.py [base_url] [model] [lengths 32768 131072] [api_key]
 """
 import json, sys, time, urllib.request
 
 URL = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8888/v1/chat/completions"
 MODEL = sys.argv[2] if len(sys.argv) > 2 else "deepseek-v4-flash-0731"
 LENGTHS = [int(x) for x in (sys.argv[3].split(",") if len(sys.argv) > 3 else "32768,131072".split(","))]
+API_KEY = sys.argv[4] if len(sys.argv) > 4 else ""
+
+
+def _headers():
+    h = {"Content-Type": "application/json"}
+    if API_KEY:
+        h["Authorization"] = f"Bearer {API_KEY}"
+    return h
 
 TOOLS = [
     {"type": "function", "function": {"name": "search_web", "description": "Search the web for up-to-date information.",
@@ -37,7 +45,7 @@ def call(messages, tools=None, max_tokens=800, temp=0):
     if tools is not None:
         body["tools"] = tools
         body["tool_choice"] = "auto"
-    req = urllib.request.Request(URL, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(URL, data=json.dumps(body).encode(), headers=_headers())
     t0 = time.perf_counter()
     with urllib.request.urlopen(req, timeout=900) as r:
         d = json.load(r)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Tool-calling battery for DS4 Keys — verifies the recipe's tool fixes work live.
-Usage: tool_battery.py [base_url] [model]
+Usage: tool_battery.py [base_url] [model] [api_key]
 Covers: single call, complex schema, multi-turn, parallel calls, thinking+tool,
 and the issue55 truncation scenario (max_tokens cut mid-tool-call).
 """
@@ -8,6 +8,14 @@ import json, sys, time, urllib.request
 
 URL = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8888/v1/chat/completions"
 MODEL = sys.argv[2] if len(sys.argv) > 2 else "deepseek-v4-flash-0731"
+API_KEY = sys.argv[3] if len(sys.argv) > 3 else ""
+
+
+def _headers():
+    h = {"Content-Type": "application/json"}
+    if API_KEY:
+        h["Authorization"] = f"Bearer {API_KEY}"
+    return h
 
 TOOLS = [
     {"type": "function", "function": {"name": "search_web", "description": "Search the web for up-to-date information. Use when the answer may have changed recently or you need facts beyond your training.",
@@ -27,7 +35,7 @@ def call(messages, tools=None, tool_choice=None, max_tokens=800, thinking=None):
         body["tool_choice"] = tool_choice or "auto"
     if thinking is not None:
         body["chat_template_kwargs"] = {"thinking": thinking}
-    req = urllib.request.Request(URL, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(URL, data=json.dumps(body).encode(), headers=_headers())
     t0 = time.perf_counter()
     with urllib.request.urlopen(req, timeout=300) as r:
         d = json.load(r)

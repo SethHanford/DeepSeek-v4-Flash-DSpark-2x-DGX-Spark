@@ -107,12 +107,15 @@ lines recur). Making the model actually emit the tool-call DSML structure
 ## Artifacts preserved
 - `sitecustomize-loaded-after-serve2.jsonl` — the baseline loop capture (no penalty).
 - `issue237_capture_A_penalty_on.jsonl` — the Config A capture (penalty 1.05), still loops.
-- `scripts/analyze-issue237-capture.py` — repetition detector.
-- `scripts/analyze-issue237-fresh.py` — refined loop detector (flags genuine loops only).
 - `patches/sitecustomize.py` — the instrumentation deployed as sitecustomize.
-- `scripts/diag-issue237-encode-compare.py` — encoder comparison diagnostic.
-- `scripts/instrument-issue237.py` — earlier encoder instrumentation.
 - `issue237_capture.jsonl` — earlier encoder-level capture.
+
+The one-off analysis/diagnostic scripts used during the investigation
+(`analyze-issue237-capture.py`, `analyze-issue237-fresh.py`,
+`diag-issue237-encode-compare.py`, `instrument-issue237.py`) were not shipped;
+they were investigation-only and are superseded by the shipped
+`DSPARK_ENABLE_ISSUE237_LOGGING` sitecustomize logger and the
+`scripts/test-issue237-*.py` suites.
 
 ## Loop patterns observed
 

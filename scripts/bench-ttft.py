@@ -14,6 +14,14 @@ from urllib.error import URLError
 
 API = os.environ.get("VLLM_API_URL", "http://127.0.0.1:8888")
 MODEL = os.environ.get("VLLM_MODEL", "deepseek-v4-flash-0731")
+API_KEY = ""
+
+
+def _headers():
+    h = {"Content-Type": "application/json"}
+    if API_KEY:
+        h["Authorization"] = f"Bearer {API_KEY}"
+    return h
 
 
 def make_prompt(target_tokens: int) -> str:
@@ -34,7 +42,7 @@ def single_request(prompt: str, max_tokens: int = 32) -> dict:
     req = Request(
         f"{API}/v1/completions",
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers=_headers(),
     )
 
     t0 = time.perf_counter()
@@ -103,7 +111,11 @@ def main():
                         help="Requests per prompt length")
     parser.add_argument("--output", default=None,
                         help="Output JSON path (default: results/bench-<ts>.json)")
+    parser.add_argument("--api-key", default="",
+                        help="Bearer token for the OpenAI endpoint (optional)")
     args = parser.parse_args()
+    global API_KEY
+    API_KEY = args.api_key
 
     lengths = [int(x) for x in args.prompt_len.split(",")]
     os.makedirs("results", exist_ok=True)
