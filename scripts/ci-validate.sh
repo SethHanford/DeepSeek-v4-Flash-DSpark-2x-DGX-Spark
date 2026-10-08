@@ -89,6 +89,12 @@ py_files+=(
   patches/hotfix-vllm-c128a-prefill-cache.py
   scripts/test-issue144-effort-align.py
   patches/hotfix-dsv4-issue144-effort-align.py
+  scripts/test-issue237-repetition-penalty.py
+  patches/hotfix-vllm-issue237-repetition-penalty.py
+  scripts/test-issue237-toolcall-directive.py
+  patches/hotfix-vllm-issue237-toolcall-directive.py
+  scripts/test-issue237-circuit-breaker.py
+  patches/hotfix-vllm-issue237-circuit-breaker.py
   scripts/test-issue117-shm-ring-buffer.py
   scripts/verify-issue136-xgrammar-live.py
   scripts/test-empty-encoder-output-hotfix.py
@@ -191,6 +197,12 @@ python3 scripts/test-c128a-prefill-cache.py -q
 ok "test-c128a-prefill-cache"
 python3 scripts/test-issue144-effort-align.py -q
 ok "test-issue144-effort-align"
+python3 scripts/test-issue237-repetition-penalty.py -q
+ok "test-issue237-repetition-penalty"
+python3 scripts/test-issue237-toolcall-directive.py -q
+ok "test-issue237-toolcall-directive"
+python3 scripts/test-issue237-circuit-breaker.py -q
+ok "test-issue237-circuit-breaker"
 python3 scripts/test-issue117-shm-ring-buffer.py -q
 ok "test-issue117-shm-ring-buffer"
 python3 scripts/test-empty-encoder-output-hotfix.py -q
@@ -716,4 +728,26 @@ for fn in remote_compose remote_compose2; do
     bad "$fn must be defined exactly once and carry issue191/async/block-k + rope-swa/swa-prefix/dsml-recovery/mxfp4-indexer/issue144 passthroughs"
   fi
 done
+
+# Issue #237 repetition penalty: default OFF, exact-1/fail-closed, worker-synced.
+if grep -Fq 'DSPARK_ENABLE_ISSUE237_REPETITION_PENALTY: "${DSPARK_ENABLE_ISSUE237_REPETITION_PENALTY:-0}"' docker-compose.dspark.yml   && grep -Fq 'if [ "$${DSPARK_ENABLE_ISSUE237_REPETITION_PENALTY:-0}" = "1" ]; then python3 /opt/hotfix-vllm-issue237-repetition-penalty.py || exit 1; fi;' docker-compose.dspark.yml   && grep -Fq "DSPARK_ISSUE237_REPETITION_PENALTY_HOTFIX='./patches/hotfix-vllm-issue237-repetition-penalty.py'" start-deepseek-v4-flash-dspark.sh   && grep -Fq 'DSPARK_ENABLE_ISSUE237_REPETITION_PENALTY=0' .env.dspark.example; then
+  ok "compose/launcher gate the issue #237 repetition penalty"
+else
+  bad "issue #237 repetition penalty must be default-off, fail-closed, worker-synced and preflighted"
+fi
+
+# Issue #237 tool-call directive: default OFF, exact-1/fail-closed, worker-synced.
+if grep -Fq 'DSPARK_ENABLE_ISSUE237_TOOLCALL_DIRECTIVE: "${DSPARK_ENABLE_ISSUE237_TOOLCALL_DIRECTIVE:-0}"' docker-compose.dspark.yml   && grep -Fq 'if [ "$${DSPARK_ENABLE_ISSUE237_TOOLCALL_DIRECTIVE:-0}" = "1" ]; then python3 /opt/hotfix-vllm-issue237-toolcall-directive.py || exit 1; fi;' docker-compose.dspark.yml   && grep -Fq 'DSPARK_ISSUE237_TOOLCALL_DIRECTIVE_HOTFIX="${DSPARK_ISSUE237_TOOLCALL_DIRECTIVE_HOTFIX:-$SCRIPT_DIR/patches/hotfix-vllm-issue237-toolcall-directive.py}"' start-deepseek-v4-flash-dspark.sh   && grep -Fq 'DSPARK_ENABLE_ISSUE237_TOOLCALL_DIRECTIVE=0' .env.dspark.example; then
+  ok "compose/launcher gate the issue #237 tool-call directive"
+else
+  bad "issue #237 tool-call directive must be default-off, fail-closed, worker-synced and preflighted"
+fi
+
+# Issue #237 circuit breaker: default OFF, exact-1/fail-closed, worker-synced.
+if grep -Fq 'DSPARK_ENABLE_ISSUE237_CIRCUIT_BREAKER: "${DSPARK_ENABLE_ISSUE237_CIRCUIT_BREAKER:-0}"' docker-compose.dspark.yml   && grep -Fq 'if [ "$${DSPARK_ENABLE_ISSUE237_CIRCUIT_BREAKER:-0}" = "1" ]; then python3 /opt/hotfix-vllm-issue237-circuit-breaker.py || exit 1; fi;' docker-compose.dspark.yml   && grep -Fq 'DSPARK_ISSUE237_CIRCUIT_BREAKER_HOTFIX="${DSPARK_ISSUE237_CIRCUIT_BREAKER_HOTFIX:-$SCRIPT_DIR/patches/hotfix-vllm-issue237-circuit-breaker.py}"' start-deepseek-v4-flash-dspark.sh   && grep -Fq 'DSPARK_ENABLE_ISSUE237_CIRCUIT_BREAKER=0' .env.dspark.example   && grep -Fq 'DSPARK_ISSUE237_LINE_LOOP_THRESHOLD=10' .env.dspark.example   && grep -Fq 'DSPARK_ISSUE237_CIRCUIT_BREAKER_LOG=1' .env.dspark.example; then
+  ok "compose/launcher gate the issue #237 circuit breaker"
+else
+  bad "issue #237 circuit breaker must be default-off, fail-closed, worker-synced and preflighted"
+fi
+
 echo "CI validate passed (CPU recipe gates only)."

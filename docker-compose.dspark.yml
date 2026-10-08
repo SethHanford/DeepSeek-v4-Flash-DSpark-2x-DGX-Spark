@@ -430,10 +430,13 @@ services:
       # counters are logged as metrics only (see LOG flag).
       DSPARK_ENABLE_ISSUE237_CIRCUIT_BREAKER: "${DSPARK_ENABLE_ISSUE237_CIRCUIT_BREAKER:-0}"
       # Number of near-duplicate paragraph pairs before the breaker trips.
-      DSPARK_ISSUE237_PARAGRAPH_LOOP_THRESHOLD: "${DSPARK_ISSUE237_PARAGRAPH_LOOP_THRESHOLD:-2}"
-      # 1 = emit a single circuit-breaker log line per trip (metrics). 0
-      # (default) = silent.
-      DSPARK_ISSUE237_CIRCUIT_BREAKER_LOG: "${DSPARK_ISSUE237_CIRCUIT_BREAKER_LOG:-0}"
+      DSPARK_ISSUE237_PARAGRAPH_LOOP_THRESHOLD: "${DSPARK_ISSUE237_PARAGRAPH_LOOP_THRESHOLD:-10}"
+      # Number of near-duplicate line pairs before the breaker trips (catches
+      # loops separated by single newlines rather than blank-line breaks).
+      DSPARK_ISSUE237_LINE_LOOP_THRESHOLD: "${DSPARK_ISSUE237_LINE_LOOP_THRESHOLD:-10}"
+      # 1 = emit a single circuit-breaker log line per trip (metrics). 1
+      # (default) = emit; 0 = silent.
+      DSPARK_ISSUE237_CIRCUIT_BREAKER_LOG: "${DSPARK_ISSUE237_CIRCUIT_BREAKER_LOG:-1}"
       # Issue #66: GPU V2 thinking_token_budget hotfix. 0 (default) = stock
       # sampler (HTTP 400 if a client sends the field). 1 = apply at boot
       # (fail-closed) so explicit thinking_token_budget works. Omit-field

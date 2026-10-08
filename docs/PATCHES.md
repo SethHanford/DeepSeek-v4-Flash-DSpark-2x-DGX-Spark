@@ -1078,6 +1078,68 @@ is byte-identical by construction and needs no gate.
 
 ---
 
+## Issue #237 — token-repetition loop in chat mode (default OFF)
+
+**Symptom.** In `thinking_mode: "chat"` with large conversations (300+ messages),
+the model enters a token-repetition loop. The engine sampling defaults are
+temperature=1.0, top_p=1.0, top_k=0, and `repetition_penalty=1.0` (no penalty),
+so nothing prevents the model from repeating a fixed token sequence until
+`max_tokens` is reached. The model also narrates an action it intends to take
+("Let me check the API key") but never emits the tool-call DSML structure, so it
+loops on the narration.
+
+Three independent, opt-in hotfixes address it (all default `0` = stock):
+
+**1. Minimum repetition penalty** (`DSPARK_ENABLE_ISSUE237_REPETITION_PENALTY`,
+`patches/hotfix-vllm-issue237-repetition-penalty.py`). In
+`vllm/v1/worker/gpu/sample/penalties.py`, `PenaltiesState.add_request` stores the
+client's `repetition_penalty` verbatim and `use_penalty()` returns `False` when
+it equals 1.0, so the penalty kernel is never launched. The hotfix clamps a
+client that leaves the default (`repetition_penalty <= 1.0`) up to
+`DSPARK_ISSUE237_REPETITION_PENALTY` (default 1.05) and marks the request as
+needing penalties. A client that explicitly sets a penalty > 1.0 is left
+untouched.
+
+**2. Tool-call directive** (`DSPARK_ENABLE_ISSUE237_TOOLCALL_DIRECTIVE`,
+`patches/hotfix-vllm-issue237-toolcall-directive.py`). Appends an
+act-before-speak directive to the `TOOLS_TEMPLATE` in
+`vllm/tokenizers/deepseek_v4_encoding.py` that steers the model to emit a tool
+call the instant it intends to use one, and to say so once and stop if no tool
+can do what it needs. Phrased positively (no prohibitions).
+
+**3. Deterministic circuit breaker** (`DSPARK_ENABLE_ISSUE237_CIRCUIT_BREAKER`,
+`patches/hotfix-vllm-issue237-circuit-breaker.py`). Adds a circuit breaker in
+the streaming output path (`vllm/entrypoints/openai/chat_completion/serving.py`)
+that tracks accumulated output text and detects near-duplicate recent paragraphs
+(a sliding-window signature comparison) or near-duplicate recent lines (a
+line-level signature comparison that catches loops separated by single newlines
+rather than blank-line paragraph breaks). When the count of near-duplicate
+paragraph pairs exceeds `DSPARK_ISSUE237_PARAGRAPH_LOOP_THRESHOLD` (default 10),
+or the count of near-duplicate line pairs exceeds
+`DSPARK_ISSUE237_LINE_LOOP_THRESHOLD` (default 10), it aborts the request at the
+engine (`await self.engine_client.abort(request_id)`) so generation stops
+immediately, and forces `finish_reason` to "stop" so the client sees a clean
+termination. The engine abort is what actually halts generation; the
+`finish_reason` mutation alone would leave the engine burning tokens in the
+background. The paragraph and line detectors are the sole trip triggers; the
+"Let me" and stuck/restart phrase counters are logged as metrics only (too noisy
+to trip on). `DSPARK_ISSUE237_CIRCUIT_BREAKER_LOG=1` (default) emits one
+`[dspark-issue237-circuit-breaker]` line per trip; `0` silences it. Detection is
+fail-open; the intervention is deterministic.
+
+**Generation logging** (`DSPARK_ENABLE_ISSUE237_LOGGING`) installs a sitecustomize
+token logger that writes one JSON record per generated token to
+`/tmp/issue237_gen_capture.jsonl`. The capture contains raw token IDs that decode
+to session text (usernames, hostnames, paths); never commit it.
+
+All three patchers are source-exact, anchored, sha256-pinned, and fail-closed
+(`--status`/`--check`/`--self-check`, byte-restore on failure). CPU suites
+`scripts/test-issue237-repetition-penalty.py`,
+`scripts/test-issue237-toolcall-directive.py`, and
+`scripts/test-issue237-circuit-breaker.py` (fixture identity pins, transform
+pinning, fail-closed refusal, helper-block behavioural contract, wiring locks)
+run in `scripts/ci-validate.sh`.
+
 ## Issue #117 — bounded SHM dispatch-ring reader recovery
 
 ### Scope and upstream fix

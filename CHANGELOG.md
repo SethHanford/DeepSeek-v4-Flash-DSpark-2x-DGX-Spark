@@ -1,3 +1,8 @@
+## 2026-10-07
+
+### Added
+- **Issue #237 token-repetition loop fixes (all default OFF)**: three independent, opt-in hotfixes for the chat-mode token-repetition loop at large context. `DSPARK_ENABLE_ISSUE237_REPETITION_PENALTY` clamps a client that leaves the default `repetition_penalty` (1.0 = no penalty) up to `DSPARK_ISSUE237_REPETITION_PENALTY` (default 1.05) in `penalties.py`; `DSPARK_ENABLE_ISSUE237_TOOLCALL_DIRECTIVE` appends an act-before-speak directive to the DeepSeek-V4 `TOOLS_TEMPLATE`; `DSPARK_ENABLE_ISSUE237_CIRCUIT_BREAKER` adds a deterministic circuit breaker in `serving.py` that aborts the request at the engine and forces `finish_reason` to "stop" when near-duplicate recent paragraphs exceed `DSPARK_ISSUE237_PARAGRAPH_LOOP_THRESHOLD` (default 10) or near-duplicate recent lines exceed `DSPARK_ISSUE237_LINE_LOOP_THRESHOLD` (default 10), with `DSPARK_ISSUE237_CIRCUIT_BREAKER_LOG=1` (default) emitting one `[dspark-issue237-circuit-breaker]` line per trip. `DSPARK_ENABLE_ISSUE237_LOGGING` installs a sitecustomize token logger writing one JSON record per token to `/tmp/issue237_gen_capture.jsonl` (the capture decodes to session text; never commit it). All patchers are source-exact, anchored, sha256-pinned, and fail-closed. CPU suites `scripts/test-issue237-repetition-penalty.py`, `scripts/test-issue237-toolcall-directive.py`, and `scripts/test-issue237-circuit-breaker.py` (fixture identity pins, transform pinning, fail-closed refusal, helper-block behavioural contract, wiring locks) run in `scripts/ci-validate.sh`. See docs/PATCHES.md ("Issue #237").
+
 ## 2026-09-08
 
 ### Security
