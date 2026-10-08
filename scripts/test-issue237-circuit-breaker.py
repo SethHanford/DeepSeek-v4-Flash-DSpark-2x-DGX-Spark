@@ -129,11 +129,14 @@ class HelperContract(unittest.TestCase):
 
     def test_paragraph_loop_detects_repeated_paragraphs(self):
         score = self.ns["_issue237_paragraph_loop_score"]
+        # 12 identical paragraphs yield a score of 11, which exceeds the
+        # documented default threshold of 10, so the detector demonstrably
+        # trips rather than merely registering a repeat.
         text = ""
-        for _ in range(4):
+        for _ in range(12):
             text += "The API key rotation failed and the token loop continued indefinitely.\n\n"
             score(text, "req-repeat")
-        self.assertGreaterEqual(score(text, "req-repeat"), 2)
+        self.assertGreaterEqual(score(text, "req-repeat"), 10)
 
     def test_paragraph_loop_ignores_distinct_paragraphs(self):
         score = self.ns["_issue237_paragraph_loop_score"]
@@ -151,11 +154,13 @@ class HelperContract(unittest.TestCase):
 
     def test_line_loop_detects_repeated_lines(self):
         score = self.ns["_issue237_line_loop_score"]
+        # 12 identical lines yield a score of 11, which exceeds the documented
+        # default threshold of 10, so the detector demonstrably trips.
         text = ""
-        for _ in range(5):
+        for _ in range(12):
             text += '    _stub("vllm.entrypoints.openai.tool_parsers.tool_parsers_utils")\n'
             score(text, "req-line-repeat")
-        self.assertGreaterEqual(score(text, "req-line-repeat"), 2)
+        self.assertGreaterEqual(score(text, "req-line-repeat"), 10)
 
     def test_line_loop_ignores_distinct_lines(self):
         score = self.ns["_issue237_line_loop_score"]
