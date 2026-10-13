@@ -3,34 +3,32 @@
 
 Symptom
 -------
-The model enters a token-repetition loop in ``thinking_mode: "chat"`` with
-large conversations. The model narrates an action it intends to take ("Let me
-check the API key") but never emits the tool-call DSML structure, so it loops
-on the narration. The circuit-breaker hotfix
-(``hotfix-vllm-issue237-circuit-breaker.py``) breaks the loop deterministically
-by aborting the request and forcing ``finish_reason`` to "stop".
+In ``thinking_mode: "chat"`` with large conversations, the model narrates an
+action it intends to take ("Let me check the API key") but never emits the
+tool-call DSML structure, so it loops on the narration. The circuit-breaker
+hotfix (``hotfix-vllm-issue237-circuit-breaker.py``) breaks the loop by
+aborting the request and forcing ``finish_reason`` to "stop".
 
-This hotfix explores a different intervention: instead of merely stopping, it
-*completes the skipped step*. The model has already reasoned about which tool
-it wants (that is why it narrates "Let me check the API key"), but it failed to
-emit the DSML ``<invoke name="...">`` structure. This hotfix recognizes the
-narrated intent, matches it against the tools declared in ``request.tools``
-(the same set the model was reasoning over), and synthesizes a real tool call
-so the agent lane receives a dispatchable tool call instead of dead prose.
+This hotfix synthesizes the tool call the model intended but did not emit: it
+matches the loop text against the tools declared in ``request.tools`` and
+emits a dispatchable tool call.
 
-The intervention is layered on the same loop detection as the circuit breaker
+The intervention uses the same loop detection as the circuit breaker
 (near-duplicate recent paragraphs or repeated lines). On a trip it:
 
-1. Extracts the most recent "Let me [action]" / "I need to [action]" /
-   "I'll [action]" / "I should [action]" / "Let's [action]" narration.
-2. Scores each declared tool (name + description) against the narrated action
-   by token overlap and picks the best match above a confidence threshold.
+1. Matches the loop text against the tools declared in ``request.tools`` by
+   token overlap. The tool name is a stable, language-independent identifier
+   the model tends to echo even when narrating in another language, so it is
+   weighted double; the description is a secondary signal. No English
+   narration prefix is required, so the matcher is language-agnostic.
+2. Picks the best match above an env-tunable confidence floor
+   (``DSPARK_ISSUE237_TOOLCALL_MATCH_FLOOR``, default 2.0).
 3. If a tool matches, synthesizes a ``DeltaMessage`` carrying that tool call,
    marks ``tools_streamed`` so the finish logic reports
    ``finish_reason="tool_calls"``, and aborts the request at the engine so the
    loop stops burning tokens.
-4. If no tool matches (or no narration is found), it falls back to the
-   circuit-breaker behavior: abort and force ``finish_reason`` to "stop".
+4. If no tool matches, it falls back to the circuit-breaker behavior: abort
+   and force ``finish_reason`` to "stop".
 
 Detection is fail-open (a detection error does not break the normal streaming
 path); the intervention is deterministic.
@@ -165,27 +163,18 @@ HELPER_NEW = (
     "    except ValueError:\n"
     "        return 10\n"
     "\n"
-    "def _issue237_extract_intent(text: str) -> str | None:\n"
-    "    \"\"\"Extract the most recent narrated action from a 'Let me [action]' loop.\n"
+    "def _issue237_match_floor() -> float:\n"
+    "    \"\"\"Return the env-tunable match confidence floor.\n"
     "\n"
-    "    The model narrates an action it intends to take but never emits the\n"
-    "    tool-call DSML structure. This pulls the action phrase out of the\n"
-    "    narration so it can be matched against the declared tools. Returns the\n"
-    "    last (most recent) match, or None if no narration is present.\n"
+    "    The tool name is weighted double, so a single name-token overlap scores\n"
+    "    2.0. Raise ``DSPARK_ISSUE237_TOOLCALL_MATCH_FLOOR`` to require a\n"
+    "    stronger match; lower it to be more permissive. Default 2.0.\n"
     "    \"\"\"\n"
-    "    import re as _re\n"
-    "    patterns = (\n"
-    "        r\"\\bLet me\\s+(.+?)(?:[.!?]|\\n|$)\",\n"
-    "        r\"\\bI need to\\s+(.+?)(?:[.!?]|\\n|$)\",\n"
-    "        r\"\\bI'?ll\\s+(.+?)(?:[.!?]|\\n|$)\",\n"
-    "        r\"\\bI should\\s+(.+?)(?:[.!?]|\\n|$)\",\n"
-    "        r\"\\bLet'?s\\s+(.+?)(?:[.!?]|\\n|$)\",\n"
-    "    )\n"
-    "    best = None\n"
-    "    for pat in patterns:\n"
-    "        for m in _re.finditer(pat, text, _re.IGNORECASE):\n"
-    "            best = m.group(1).strip()\n"
-    "    return best or None\n"
+    "    import os as _os\n"
+    "    try:\n"
+    "        return float(_os.environ.get(\"DSPARK_ISSUE237_TOOLCALL_MATCH_FLOOR\", \"2.0\"))\n"
+    "    except ValueError:\n"
+    "        return 2.0\n"
     "\n"
     "def _issue237_tool_tokens(tool: object) -> tuple[str, set]:\n"
     "    \"\"\"Return (tool_name, token_set) for a declared tool.\n"
@@ -211,22 +200,25 @@ HELPER_NEW = (
     "        return set(w.lower() for w in _re.findall(r\"[a-zA-Z0-9]+\", s))\n"
     "    return name, _tokens(name) | _tokens(desc)\n"
     "\n"
-    "def _issue237_match_tool(intent: str, tools: object) -> str | None:\n"
-    "    \"\"\"Match a narrated action against the declared tools.\n"
+    "def _issue237_match_tool(loop_text: str, tools: object) -> str | None:\n"
+    "    \"\"\"Match loop text against the declared tools by token overlap.\n"
     "\n"
-    "    Scores each tool by token overlap between the narrated action and the\n"
-    "    tool's name (weighted double) plus its description. Returns the best\n"
-    "    tool name when the score clears the confidence floor, else None.\n"
+    "    Language-agnostic: it does not require an English narration prefix.\n"
+    "    The tool name is a stable, language-independent identifier the model\n"
+    "    tends to echo even when narrating in another language, so it is\n"
+    "    weighted double. The description is a secondary signal. Returns the\n"
+    "    best tool name when the score clears the env-tunable floor, else None.\n"
     "    \"\"\"\n"
     "    import re as _re\n"
-    "    if not intent or not tools:\n"
+    "    if not loop_text or not tools:\n"
     "        return None\n"
     "    def _tokens(s):\n"
     "        s = _re.sub(r\"([a-z0-9])([A-Z])\", r\"\\1 \\2\", s or \"\")\n"
     "        return set(w.lower() for w in _re.findall(r\"[a-zA-Z0-9]+\", s))\n"
-    "    intent_toks = _tokens(intent)\n"
-    "    if not intent_toks:\n"
+    "    text_toks = _tokens(loop_text)\n"
+    "    if not text_toks:\n"
     "        return None\n"
+    "    floor = _issue237_match_floor()\n"
     "    best_name = None\n"
     "    best_score = 0.0\n"
     "    for tool in tools:\n"
@@ -234,13 +226,13 @@ HELPER_NEW = (
     "        if not name:\n"
     "            continue\n"
     "        name_toks = _tokens(name)\n"
-    "        name_overlap = len(intent_toks & name_toks)\n"
-    "        desc_overlap = len(intent_toks & tool_toks) - name_overlap\n"
+    "        name_overlap = len(text_toks & name_toks)\n"
+    "        desc_overlap = len(text_toks & tool_toks) - name_overlap\n"
     "        score = name_overlap * 2.0 + desc_overlap\n"
     "        if score > best_score:\n"
     "            best_score = score\n"
     "            best_name = name\n"
-    "    if best_score < 2.0:\n"
+    "    if best_score < floor:\n"
     "        return None\n"
     "    return best_name\n"
     "\n"
@@ -279,12 +271,12 @@ REGION_OLD = (
 )
 REGION_NEW = (
     "                    previous_texts[i] += delta_text\n"
-    "                    # [dspark-issue237-toolcall-on-loop] Complete the\n"
-    "                    # skipped step: on a narration loop, match the narrated\n"
-    "                    # intent against the declared tools and synthesize a\n"
-    "                    # real tool call instead of merely stopping. Falls back\n"
-    "                    # to the circuit-breaker abort+stop when no tool\n"
-    "                    # matches. Fail-open on error.\n"
+    "                    # [dspark-issue237-toolcall-on-loop] On a narration\n"
+    "                    # loop, match the loop text against the declared tools\n"
+    "                    # (language-agnostic, tool name weighted double) and\n"
+    "                    # synthesize a tool call. Falls back to the\n"
+    "                    # circuit-breaker abort+stop when no tool matches.\n"
+    "                    # Fail-open on error.\n"
     "                    if _issue237_toolcall_on_loop_enabled():\n"
     "                        try:\n"
     "                            _txt = previous_texts[i]\n"
@@ -295,8 +287,7 @@ REGION_NEW = (
     "                            if _para >= _pthr or _line >= _lthr:\n"
     "                                if not _issue237_toolcall_state[request_id].get(\"tripped\"):\n"
     "                                    _issue237_toolcall_state[request_id][\"tripped\"] = True\n"
-    "                                    _intent = _issue237_extract_intent(_txt)\n"
-    "                                    _name = _issue237_match_tool(_intent, request.tools)\n"
+    "                                    _name = _issue237_match_tool(_txt, request.tools)\n"
     "                                    if _name:\n"
     "                                        _issue237_toolcall_on_loop_log(\n"
     "                                            f\"synthesize tool={_name} \"\n"
@@ -324,7 +315,7 @@ REGION_NEW = (
 
 # Self-pins: the region constant must not drift inside this file.
 REGION_OLD_SHA256 = "94de98ec8d8311897767cd54de6b1119a5944eae3b9c0328639e66ae1630913d"
-REGION_NEW_SHA256 = "9f8751279a38c345199384f800203c61dd1eb9e9a6dbc5090bff8ba60cdb008b"
+REGION_NEW_SHA256 = "ab6fc312e43a5c85a346d3de2febcf08a6bed5e4d5a79d8ac1ccbd5367c7524e"
 
 
 def _sha256(data: bytes) -> str:
@@ -384,10 +375,10 @@ def transform(stock: bytes) -> bytes:
 
 
 def _issue237_verify_matcher(
-    extract_intent, match_tool, synthesize
+    match_tool, synthesize
 ) -> tuple[bool, str]:
-    """Behavioral proof that the matcher maps a narrated action to a declared
-    tool and stays quiet when no tool matches. Returns (ok, why)."""
+    """Behavioral proof that the matcher maps loop text to a declared tool and
+    stays quiet when no tool matches. Returns (ok, why)."""
     class _Fn:
         def __init__(self, name, description):
             self.name = name
@@ -403,27 +394,20 @@ def _issue237_verify_matcher(
         _Tool("run_command", "Execute a shell command in the container."),
     ]
 
-    # A narrated "check the API key" must resolve to the get_api_key tool.
-    intent = extract_intent("Let me check the API key.")
-    if intent != "check the API key":
-        return False, f"intent extraction failed: {intent!r}"
-    name = match_tool(intent, tools)
+    # Loop text naming the tool must resolve to that tool.
+    name = match_tool("Let me check the API key.", tools)
     if name != "get_api_key":
         return False, f"did not match get_api_key, got {name!r}"
 
-    # A narrated "read the file" must resolve to read_file.
-    name = match_tool(extract_intent("Let me read the file."), tools)
+    # A multilingual loop that echoes the tool identifier must still match.
+    name = match_tool("我需要调用 read_file 来读取文件", tools)
     if name != "read_file":
-        return False, f"did not match read_file, got {name!r}"
+        return False, f"did not match read_file from multilingual loop, got {name!r}"
 
-    # A narration with no tool overlap must not match anything.
-    name = match_tool(extract_intent("Let me bake a sourdough loaf."), tools)
+    # Loop text with no tool overlap must not match anything.
+    name = match_tool("Let me bake a sourdough loaf.", tools)
     if name is not None:
         return False, f"matched an unrelated tool: {name!r}"
-
-    # No narration at all must not match.
-    if extract_intent("The API key rotation failed and the loop continued.") is not None:
-        return False, "extract_intent false-positived on non-narration text"
 
     # The synthesizer must produce a DeltaMessage-shaped object with one call.
     msg = synthesize("get_api_key")
@@ -433,13 +417,13 @@ def _issue237_verify_matcher(
     if getattr(calls[0].function, "name", None) != "get_api_key":
         return False, "synthesized call has the wrong name"
 
-    return True, "matcher maps narration to declared tools and stays quiet otherwise"
+    return True, "matcher maps loop text to declared tools and stays quiet otherwise"
 
 
 def _self_check(patched_src: bytes) -> tuple[bool, str]:
     """Behavioral proof: the helpers are present, the module compiles, and the
-    matcher maps a narrated action to a declared tool while staying quiet when
-    no tool matches."""
+    matcher maps loop text to a declared tool while staying quiet when no tool
+    matches."""
     import importlib.util
 
     stock_src = patched_src.replace(REGION_NEW.encode(), REGION_OLD.encode(), 1)
@@ -463,7 +447,7 @@ def _self_check(patched_src: bytes) -> tuple[bool, str]:
                 "_issue237_toolcall_on_loop_enabled",
                 "_issue237_paragraph_loop_score",
                 "_issue237_line_loop_score",
-                "_issue237_extract_intent",
+                "_issue237_match_floor",
                 "_issue237_match_tool",
                 "_issue237_synthesize_tool_call",
                 "_issue237_toolcall_on_loop_log",
@@ -474,7 +458,6 @@ def _self_check(patched_src: bytes) -> tuple[bool, str]:
                 return False, "helper unexpectedly present in stock module"
 
             ok, why = _issue237_verify_matcher(
-                patched._issue237_extract_intent,
                 patched._issue237_match_tool,
                 patched._issue237_synthesize_tool_call,
             )

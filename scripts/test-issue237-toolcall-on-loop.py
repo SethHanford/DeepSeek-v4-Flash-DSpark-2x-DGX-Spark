@@ -36,12 +36,12 @@ CI = ROOT / "scripts" / "ci-validate.sh"
 
 POST55_STOCK_SHA256 = "4024243c259058c09f4d9340d42f410e68e160b96fcd5c09b1a68467b04f4f3a"
 POST55_STOCK_SIZE = 51912
-POST55_PATCHED_SHA256 = "deb3e0789e85111f436478a095cd1099bfeb430a93b9ae0cbae612d9ecd9fbc7"
-POST55_PATCHED_SIZE = 62150
+POST55_PATCHED_SHA256 = "d1bb1817dee6eda57d958fb031a3f099d3293b52672444dcd96cd0bc8fe8f0ae"
+POST55_PATCHED_SIZE = 61863
 PRISTINE_STOCK_SHA256 = "6239fae503211193942d0e2037f7b0edcf71ed70271604701283bfc0453d202b"
 PRISTINE_STOCK_SIZE = 49931
-PRISTINE_PATCHED_SHA256 = "100dce7baaad935f9930ea61865308d6fadffc8048fbae32a06226884fc7fac7"
-PRISTINE_PATCHED_SIZE = 60169
+PRISTINE_PATCHED_SHA256 = "2a093f3cdcd891e0b012bd6be96ef10350f0114140f7e472e9bb09be60997661"
+PRISTINE_PATCHED_SIZE = 59882
 
 
 def _load_patcher():
@@ -187,38 +187,15 @@ class FixtureAndTransform(unittest.TestCase):
         self.assertEqual(HF.inspect_bytes(patched), "patched")
 
 
-class IntentExtractionContract(unittest.TestCase):
-    """Seam: _issue237_extract_intent(text) -> str | None."""
-
-    @classmethod
-    def setUpClass(cls):
-        cls.ns = _helpers()
-
-    def test_extracts_let_me_action(self):
-        extract = self.ns["_issue237_extract_intent"]
-        self.assertEqual(extract("Let me check the API key."), "check the API key")
-
-    def test_extracts_i_need_to_action(self):
-        extract = self.ns["_issue237_extract_intent"]
-        self.assertEqual(
-            extract("I need to get the API key from the container."),
-            "get the API key from the container",
-        )
-
-    def test_extracts_last_of_multiple_narrations(self):
-        extract = self.ns["_issue237_extract_intent"]
-        text = "Let me check the API key.\nLet me get the API key from the container.\n"
-        self.assertEqual(extract(text), "get the API key from the container")
-
-    def test_returns_none_on_non_narration(self):
-        extract = self.ns["_issue237_extract_intent"]
-        self.assertIsNone(
-            extract("The API key rotation failed and the loop continued indefinitely.")
-        )
-
-
 class ToolMatchContract(unittest.TestCase):
-    """Seam: _issue237_match_tool(intent, tools) -> str | None."""
+    """Seam: _issue237_match_tool(loop_text, tools) -> str | None.
+
+    The matcher is language-agnostic: it matches the loop text against the
+    declared tool names (stable identifiers) and descriptions by token overlap,
+    without requiring an English narration prefix. The tool name is weighted
+    highest because it is a language-independent identifier the model tends to
+    echo even when narrating in another language.
+    """
 
     @classmethod
     def setUpClass(cls):
@@ -238,14 +215,40 @@ class ToolMatchContract(unittest.TestCase):
             match("get the API key from the container", DECLARED_TOOLS), "get_api_key"
         )
 
+    def test_matches_tool_identifier_without_english_narration(self):
+        # A multilingual model may narrate in another language but still echo
+        # the tool identifier. No English "Let me" prefix is required.
+        match = self.ns["_issue237_match_tool"]
+        self.assertEqual(match("我需要调用 read_file 来读取文件", DECLARED_TOOLS), "read_file")
+
+    def test_matches_tool_identifier_embedded_in_loop(self):
+        # The tool name is a stable identifier; it should match even when the
+        # surrounding loop text is long and in a non-English language.
+        match = self.ns["_issue237_match_tool"]
+        loop = "我需要获取 API key。\n" * 12 + "让我调用 get_api_key 来检查。\n"
+        self.assertEqual(match(loop, DECLARED_TOOLS), "get_api_key")
+
     def test_no_match_on_unrelated_action(self):
         match = self.ns["_issue237_match_tool"]
         self.assertIsNone(match("bake a sourdough loaf", DECLARED_TOOLS))
 
-    def test_no_match_on_empty_intent_or_tools(self):
+    def test_no_match_on_empty_text_or_tools(self):
         match = self.ns["_issue237_match_tool"]
         self.assertIsNone(match("", DECLARED_TOOLS))
         self.assertIsNone(match("check the API key", None))
+
+    def test_floor_is_env_tunable(self):
+        # "run tests" overlaps run_command's name by exactly one token ("run"),
+        # scoring 2.0 (name weighted double) with no description overlap. It is
+        # accepted at the default floor but rejected when the floor is raised.
+        match = self.ns["_issue237_match_tool"]
+        original_floor = self.ns["_issue237_match_floor"]
+        self.assertEqual(match("run tests", DECLARED_TOOLS), "run_command")
+        self.ns["_issue237_match_floor"] = lambda: 3.0
+        try:
+            self.assertIsNone(match("run tests", DECLARED_TOOLS))
+        finally:
+            self.ns["_issue237_match_floor"] = original_floor
 
 
 class SynthesisContract(unittest.TestCase):
@@ -359,6 +362,10 @@ class Wiring(unittest.TestCase):
             compose,
         )
         self.assertIn(
+            'DSPARK_ISSUE237_TOOLCALL_MATCH_FLOOR: "${DSPARK_ISSUE237_TOOLCALL_MATCH_FLOOR:-2.0}"',
+            compose,
+        )
+        self.assertIn(
             'if [ "$${DSPARK_ENABLE_ISSUE237_TOOLCALL_ON_LOOP:-0}" = "1" ]; then '
             "python3 /opt/hotfix-vllm-issue237-toolcall-on-loop.py || exit 1; fi;",
             compose,
@@ -384,6 +391,7 @@ class Wiring(unittest.TestCase):
     def test_env_example_and_ci(self):
         env = ENV_EXAMPLE.read_text()
         self.assertIn("DSPARK_ENABLE_ISSUE237_TOOLCALL_ON_LOOP=0", env)
+        self.assertIn("DSPARK_ISSUE237_TOOLCALL_MATCH_FLOOR=2.0", env)
         self.assertIn("scripts/test-issue237-toolcall-on-loop.py", CI.read_text())
 
 
@@ -396,7 +404,6 @@ class SelfCheckVerifyContract(unittest.TestCase):
 
     def test_accepts_working_matcher(self):
         ok, why = HF._issue237_verify_matcher(
-            self.ns["_issue237_extract_intent"],
             self.ns["_issue237_match_tool"],
             self.ns["_issue237_synthesize_tool_call"],
         )
@@ -407,7 +414,6 @@ class SelfCheckVerifyContract(unittest.TestCase):
             return None
 
         ok, why = HF._issue237_verify_matcher(
-            self.ns["_issue237_extract_intent"],
             no_match,
             self.ns["_issue237_synthesize_tool_call"],
         )
@@ -419,7 +425,6 @@ class SelfCheckVerifyContract(unittest.TestCase):
             return "get_api_key"
 
         ok, why = HF._issue237_verify_matcher(
-            self.ns["_issue237_extract_intent"],
             always_match,
             self.ns["_issue237_synthesize_tool_call"],
         )

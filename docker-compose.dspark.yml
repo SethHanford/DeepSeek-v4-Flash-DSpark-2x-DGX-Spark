@@ -109,8 +109,7 @@ services:
       # Codex-only agent_message history compatibility (opt-in).
       - ${DSPARK_CODEX_AGENT_MESSAGE_HOTFIX:-./patches/hotfix-vllm-codex-agent-message.py}:/opt/hotfix-vllm-codex-agent-message.py:ro
       # Issue #237: tool-call-on-loop (opt-in). On a narration loop, match the
-      # narrated intent against the declared tools and synthesize a tool call
-      # instead of merely stopping.
+      # loop text against the declared tools and synthesize a tool call.
       - ${DSPARK_ISSUE237_TOOLCALL_ON_LOOP_HOTFIX:-./patches/hotfix-vllm-issue237-toolcall-on-loop.py}:/opt/hotfix-vllm-issue237-toolcall-on-loop.py:ro
       - ${DSPARK_PATCHES_DIR:-./patches}:/opt/dspark-patches:ro
       # TP=3 group-pad patch (no-op unless TP_SIZE=3). Sourced from
@@ -398,12 +397,16 @@ services:
       # effort buckets (fail-closed encoder patch). Default 0 = stock renderer.
       DSPARK_ENABLE_ISSUE144_EFFORT_ALIGN: "${DSPARK_ENABLE_ISSUE144_EFFORT_ALIGN:-0}"
       # Issue #237: tool-call-on-loop. 0 (default) = stock streaming path. 1 =
-      # on a narration loop, match the narrated intent against the declared
-      # tools and synthesize a tool call instead of merely stopping.
+      # on a narration loop, match the loop text against the declared tools
+      # (language-agnostic, tool name weighted double) and synthesize a tool
+      # call.
       DSPARK_ENABLE_ISSUE237_TOOLCALL_ON_LOOP: "${DSPARK_ENABLE_ISSUE237_TOOLCALL_ON_LOOP:-0}"
       # 1 = emit a single toolcall-on-loop log line per trip. 0 (default) =
       # silent.
       DSPARK_ISSUE237_TOOLCALL_ON_LOOP_LOG: "${DSPARK_ISSUE237_TOOLCALL_ON_LOOP_LOG:-0}"
+      # Minimum match score to synthesize a tool call (default 2.0 = one
+      # name-token overlap). Raise to require a stronger match.
+      DSPARK_ISSUE237_TOOLCALL_MATCH_FLOOR: "${DSPARK_ISSUE237_TOOLCALL_MATCH_FLOOR:-2.0}"
       # Issue #66: GPU V2 thinking_token_budget hotfix. 0 (default) = stock
       # sampler (HTTP 400 if a client sends the field). 1 = apply at boot
       # (fail-closed) so explicit thinking_token_budget works. Omit-field
