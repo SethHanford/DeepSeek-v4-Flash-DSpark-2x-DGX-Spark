@@ -36,12 +36,12 @@ CI = ROOT / "scripts" / "ci-validate.sh"
 
 POST55_STOCK_SHA256 = "4024243c259058c09f4d9340d42f410e68e160b96fcd5c09b1a68467b04f4f3a"
 POST55_STOCK_SIZE = 51912
-POST55_PATCHED_SHA256 = "748fb5269779561af68e6ca99a8bd75c2db607a4a7ea8df5dd6dd922a8facbdc"
-POST55_PATCHED_SIZE = 61893
+POST55_PATCHED_SHA256 = "84927c5a78d962811ecace19590755033686ba71f01a8b0f8737b5e8bd17e517"
+POST55_PATCHED_SIZE = 63375
 PRISTINE_STOCK_SHA256 = "6239fae503211193942d0e2037f7b0edcf71ed70271604701283bfc0453d202b"
 PRISTINE_STOCK_SIZE = 49931
-PRISTINE_PATCHED_SHA256 = "065fd6f85edf3365a71a9c56f68d5a003b631992e093f4ec2f442f900baf2f7b"
-PRISTINE_PATCHED_SIZE = 59912
+PRISTINE_PATCHED_SHA256 = "6173f25d55e4492376ba542a67a3fbfe734934061278c2c0b1a41c71a82fcb5b"
+PRISTINE_PATCHED_SIZE = 61394
 
 
 def _load_patcher():
@@ -263,6 +263,45 @@ class ToolMatchContract(unittest.TestCase):
             self.assertIsNone(match("run tests", DECLARED_TOOLS))
         finally:
             self.ns["_issue237_match_floor"] = original_floor
+
+    def test_delta_text_combines_with_recent_window(self):
+        # The matcher scores both the recent window (loop_text) and the
+        # delta_text, taking the max score per tool. A narration loop with no
+        # tool intent in either signal must circuit-break.
+        match = self.ns["_issue237_match_tool"]
+        self.assertIsNone(
+            match(
+                "Let me look at the matcher call site.",
+                DECLARED_TOOLS,
+                "Let me look at the matcher call site.",
+            )
+        )
+
+    def test_delta_text_provides_tool_intent(self):
+        # When the recent window is a weak narration loop but the delta_text
+        # carries real tool intent, the matcher must resolve to that tool.
+        match = self.ns["_issue237_match_tool"]
+        self.assertEqual(
+            match(
+                "Let me look at the matcher call site.",
+                DECLARED_TOOLS,
+                "Let me read the file.",
+            ),
+            "read_file",
+        )
+
+    def test_recent_window_provides_tool_intent(self):
+        # When the delta_text is weak but the recent window carries real tool
+        # intent, the matcher must resolve to that tool.
+        match = self.ns["_issue237_match_tool"]
+        self.assertEqual(
+            match(
+                "Let me read the file.",
+                DECLARED_TOOLS,
+                "Let me look at the matcher call site.",
+            ),
+            "read_file",
+        )
 
 
 class SynthesisContract(unittest.TestCase):
