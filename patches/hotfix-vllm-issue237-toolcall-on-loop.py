@@ -285,8 +285,8 @@ REGION_NEW = (
     "                            _line = _issue237_line_loop_score(_txt, request_id)\n"
     "                            _lthr = _issue237_line_loop_threshold()\n"
     "                            if _para >= _pthr or _line >= _lthr:\n"
-    "                                if not _issue237_toolcall_state[request_id].get(\"tripped\"):\n"
-    "                                    _issue237_toolcall_state[request_id][\"tripped\"] = True\n"
+    "                                if not _issue237_toolcall_state.setdefault(request_id, {}).get(\"tripped\"):\n"
+    "                                    _issue237_toolcall_state.setdefault(request_id, {})[\"tripped\"] = True\n"
     "                                    _name = _issue237_match_tool(_txt, request.tools)\n"
     "                                    if _name:\n"
     "                                        _issue237_toolcall_on_loop_log(\n"
@@ -315,7 +315,7 @@ REGION_NEW = (
 
 # Self-pins: the region constant must not drift inside this file.
 REGION_OLD_SHA256 = "94de98ec8d8311897767cd54de6b1119a5944eae3b9c0328639e66ae1630913d"
-REGION_NEW_SHA256 = "ab6fc312e43a5c85a346d3de2febcf08a6bed5e4d5a79d8ac1ccbd5367c7524e"
+REGION_NEW_SHA256 = "08f018f4a00763247773e95ff4e44e704aab54e200c3b9e17c18c8c869a222a8"
 
 
 def _sha256(data: bytes) -> str:

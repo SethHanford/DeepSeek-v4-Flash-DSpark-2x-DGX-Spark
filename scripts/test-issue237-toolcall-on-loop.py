@@ -36,12 +36,12 @@ CI = ROOT / "scripts" / "ci-validate.sh"
 
 POST55_STOCK_SHA256 = "4024243c259058c09f4d9340d42f410e68e160b96fcd5c09b1a68467b04f4f3a"
 POST55_STOCK_SIZE = 51912
-POST55_PATCHED_SHA256 = "d1bb1817dee6eda57d958fb031a3f099d3293b52672444dcd96cd0bc8fe8f0ae"
-POST55_PATCHED_SIZE = 61863
+POST55_PATCHED_SHA256 = "748fb5269779561af68e6ca99a8bd75c2db607a4a7ea8df5dd6dd922a8facbdc"
+POST55_PATCHED_SIZE = 61893
 PRISTINE_STOCK_SHA256 = "6239fae503211193942d0e2037f7b0edcf71ed70271604701283bfc0453d202b"
 PRISTINE_STOCK_SIZE = 49931
-PRISTINE_PATCHED_SHA256 = "2a093f3cdcd891e0b012bd6be96ef10350f0114140f7e472e9bb09be60997661"
-PRISTINE_PATCHED_SIZE = 59882
+PRISTINE_PATCHED_SHA256 = "065fd6f85edf3365a71a9c56f68d5a003b631992e093f4ec2f442f900baf2f7b"
+PRISTINE_PATCHED_SIZE = 59912
 
 
 def _load_patcher():
@@ -158,6 +158,20 @@ class FixtureAndTransform(unittest.TestCase):
         self.assertLess(
             region.index("await self.engine_client.abort(request_id)"),
             region.index('output.finish_reason = "stop"'),
+        )
+
+    def test_trip_block_state_access_is_safe(self):
+        # The one-shot "tripped" flag must be read/written via setdefault so a
+        # first-time request_id does not raise KeyError (which the fail-open
+        # except would swallow, silently disabling the intervention).
+        region = HF.REGION_NEW
+        self.assertIn(
+            '_issue237_toolcall_state.setdefault(request_id, {}).get("tripped")',
+            region,
+        )
+        self.assertIn(
+            '_issue237_toolcall_state.setdefault(request_id, {})["tripped"] = True',
+            region,
         )
 
     def test_transform_is_pinned_single_site_and_compiles(self):
