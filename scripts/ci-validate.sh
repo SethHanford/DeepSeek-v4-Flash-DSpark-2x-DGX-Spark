@@ -707,7 +707,8 @@ if grep -Fq 'DSPARK_ENABLE_ISSUE237_TOOLCALL_ON_LOOP: "${DSPARK_ENABLE_ISSUE237_
   && grep -Fq '/opt/hotfix-vllm-issue237-toolcall-on-loop.py --check' start-deepseek-v4-flash-dspark.sh \
   && grep -Fq 'DSPARK_ENABLE_ISSUE237_TOOLCALL_ON_LOOP=0' .env.dspark.example \
   && grep -Fq 'DSPARK_ISSUE237_TOOLCALL_ON_LOOP_LOG=0' .env.dspark.example \
-  && grep -Fq 'DSPARK_ISSUE237_TOOLCALL_MATCH_FLOOR=2.0' .env.dspark.example; then
+  && grep -Fq 'DSPARK_ISSUE237_TOOLCALL_MATCH_FLOOR=2.0' .env.dspark.example \
+  && grep -Fq 'DSPARK_ISSUE237_TOOLCALL_RECENT_FRACTION=0.25' .env.dspark.example; then
   ok "compose/launcher gate the issue #237 toolcall-on-loop"
 else
   bad "issue #237 toolcall-on-loop must be default-off, fail-closed, worker-synced and preflighted"
@@ -728,7 +729,8 @@ for fn in remote_compose remote_compose2; do
     && grep -Fq 'DSPARK_ENABLE_MXFP4_INDEXER_CACHE=$REMOTE_MXFP4_INDEXER' <<<"$body" \
     && grep -Fq 'DSPARK_ENABLE_ISSUE144_EFFORT_ALIGN=$REMOTE_ISSUE144_EFFORT_ALIGN' <<<"$body" \
     && grep -Fq 'DSPARK_ENABLE_ISSUE237_TOOLCALL_ON_LOOP=$REMOTE_ISSUE237_TOOLCALL_ON_LOOP' <<<"$body" \
-    && grep -Fq 'DSPARK_ISSUE237_TOOLCALL_MATCH_FLOOR=$REMOTE_ISSUE237_TOOLCALL_MATCH_FLOOR' <<<"$body"; then
+    && grep -Fq 'DSPARK_ISSUE237_TOOLCALL_MATCH_FLOOR=$REMOTE_ISSUE237_TOOLCALL_MATCH_FLOOR' <<<"$body" \
+    && grep -Fq 'DSPARK_ISSUE237_TOOLCALL_RECENT_FRACTION=$REMOTE_ISSUE237_TOOLCALL_RECENT_FRACTION' <<<"$body"; then
     ok "$fn carries the full passthrough set exactly once"
   else
     bad "$fn must be defined exactly once and carry issue191/async/block-k + rope-swa/swa-prefix/dsml-recovery/mxfp4-indexer/issue144/issue237-toolcall-on-loop passthroughs"

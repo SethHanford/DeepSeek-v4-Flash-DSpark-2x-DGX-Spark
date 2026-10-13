@@ -407,6 +407,10 @@ services:
       # Minimum match score to synthesize a tool call (default 2.0 = one
       # name-token overlap). Raise to require a stronger match.
       DSPARK_ISSUE237_TOOLCALL_MATCH_FLOOR: "${DSPARK_ISSUE237_TOOLCALL_MATCH_FLOOR:-2.0}"
+      # Fraction of the accumulated output text the matcher scores (default
+      # 0.25 = the last quarter). Scoring only the recent window keeps the
+      # matcher on the tool the model is looping on as context fills.
+      DSPARK_ISSUE237_TOOLCALL_RECENT_FRACTION: "${DSPARK_ISSUE237_TOOLCALL_RECENT_FRACTION:-0.25}"
       # Issue #66: GPU V2 thinking_token_budget hotfix. 0 (default) = stock
       # sampler (HTTP 400 if a client sends the field). 1 = apply at boot
       # (fail-closed) so explicit thinking_token_budget works. Omit-field

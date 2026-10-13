@@ -419,6 +419,10 @@ class Wiring(unittest.TestCase):
             compose,
         )
         self.assertIn(
+            'DSPARK_ISSUE237_TOOLCALL_RECENT_FRACTION: "${DSPARK_ISSUE237_TOOLCALL_RECENT_FRACTION:-0.25}"',
+            compose,
+        )
+        self.assertIn(
             'if [ "$${DSPARK_ENABLE_ISSUE237_TOOLCALL_ON_LOOP:-0}" = "1" ]; then '
             "python3 /opt/hotfix-vllm-issue237-toolcall-on-loop.py || exit 1; fi;",
             compose,
@@ -437,6 +441,9 @@ class Wiring(unittest.TestCase):
         )
         self.assertIn("DSPARK_ENABLE_ISSUE237_TOOLCALL_ON_LOOP=$REMOTE_ISSUE237_TOOLCALL_ON_LOOP", start)
         self.assertIn(
+            "DSPARK_ISSUE237_TOOLCALL_RECENT_FRACTION=$REMOTE_ISSUE237_TOOLCALL_RECENT_FRACTION", start
+        )
+        self.assertIn(
             "python3 vllm-dspark /opt/hotfix-vllm-issue237-toolcall-on-loop.py --check",
             start,
         )
@@ -445,6 +452,7 @@ class Wiring(unittest.TestCase):
         env = ENV_EXAMPLE.read_text()
         self.assertIn("DSPARK_ENABLE_ISSUE237_TOOLCALL_ON_LOOP=0", env)
         self.assertIn("DSPARK_ISSUE237_TOOLCALL_MATCH_FLOOR=2.0", env)
+        self.assertIn("DSPARK_ISSUE237_TOOLCALL_RECENT_FRACTION=0.25", env)
         self.assertIn("scripts/test-issue237-toolcall-on-loop.py", CI.read_text())
 
 
