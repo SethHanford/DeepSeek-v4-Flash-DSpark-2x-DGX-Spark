@@ -298,6 +298,7 @@ generous `max_tokens` or that budget hotfix, or thinking won't end. See
 | `DSPARK_ENABLE_SP_INDEXER` | `0` | `1` = sequence-parallel Lightning indexer for prefill chunks ≥ `DSPARK_SP_INDEXER_MIN_KEYS` (8192) compressed keys: each TP rank scores half the keys, exact top-k merge. Long-context TTFT lever ([docs/PATCHES.md](docs/PATCHES.md)). |
 | `DSPARK_ENABLE_DEEPGEMM_SM121_ALIAS` | `0` | `1` = alias DeepGEMM `sm121_*` indexer-logits headers to the shipped `sm120_*` so a cold JIT cache can compile on GB10. |
 | `DSPARK_ENABLE_C128A_PREFILL_CACHE` | `0` | `1` = reuse C128A prefill index conversion across layers sharing the current metadata. Pinned Anemll 0.1.1 SM120 path; C4A/decode unchanged, no persistent buffers added ([details](docs/PATCHES.md#c128a-prefill-metadata-cache-default-off)). |
+| `DSPARK_ENABLE_ISSUE237_TOOLCALL_ON_LOOP` | `0` | `1` = on a narration loop, match the loop text against the declared tools and synthesize a tool call; fall back to abort+stop when no tool matches, and after `DSPARK_ISSUE237_TOOLCALL_MAX_TRIPS` (default 3) trips on the same prompt just stop ([Issue #237](https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark/issues/237)). |
 | `ENABLE_VLLM_GB10_PATCH` | `0` | `1` = experimental hybrid NVFP4 plugin (`--quantization modelopt_gb10_hybrid`). |
 
 Issue **#21 / #26 / #27 / #43** Python hotfixes always run at container start

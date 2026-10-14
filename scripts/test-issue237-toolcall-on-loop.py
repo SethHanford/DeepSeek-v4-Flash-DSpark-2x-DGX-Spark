@@ -36,12 +36,12 @@ CI = ROOT / "scripts" / "ci-validate.sh"
 
 POST55_STOCK_SHA256 = "4024243c259058c09f4d9340d42f410e68e160b96fcd5c09b1a68467b04f4f3a"
 POST55_STOCK_SIZE = 51912
-POST55_PATCHED_SHA256 = "84927c5a78d962811ecace19590755033686ba71f01a8b0f8737b5e8bd17e517"
-POST55_PATCHED_SIZE = 63375
+POST55_PATCHED_SHA256 = "257b223da7f1641410c3d2bd73073d4b24ea65fd2d91e26d170ba7fb27d02261"
+POST55_PATCHED_SIZE = 65933
 PRISTINE_STOCK_SHA256 = "6239fae503211193942d0e2037f7b0edcf71ed70271604701283bfc0453d202b"
 PRISTINE_STOCK_SIZE = 49931
-PRISTINE_PATCHED_SHA256 = "6173f25d55e4492376ba542a67a3fbfe734934061278c2c0b1a41c71a82fcb5b"
-PRISTINE_PATCHED_SIZE = 61394
+PRISTINE_PATCHED_SHA256 = "e60cc5b74b6fd84ef155f9668102dffb51954f55149de80fcbd6b1a8e1c79efa"
+PRISTINE_PATCHED_SIZE = 63952
 
 
 def _load_patcher():
@@ -423,6 +423,10 @@ class Wiring(unittest.TestCase):
             compose,
         )
         self.assertIn(
+            'DSPARK_ISSUE237_TOOLCALL_MAX_TRIPS: "${DSPARK_ISSUE237_TOOLCALL_MAX_TRIPS:-3}"',
+            compose,
+        )
+        self.assertIn(
             'if [ "$${DSPARK_ENABLE_ISSUE237_TOOLCALL_ON_LOOP:-0}" = "1" ]; then '
             "python3 /opt/hotfix-vllm-issue237-toolcall-on-loop.py || exit 1; fi;",
             compose,
@@ -444,6 +448,9 @@ class Wiring(unittest.TestCase):
             "DSPARK_ISSUE237_TOOLCALL_RECENT_FRACTION=$REMOTE_ISSUE237_TOOLCALL_RECENT_FRACTION", start
         )
         self.assertIn(
+            "DSPARK_ISSUE237_TOOLCALL_MAX_TRIPS=$REMOTE_ISSUE237_TOOLCALL_MAX_TRIPS", start
+        )
+        self.assertIn(
             "python3 vllm-dspark /opt/hotfix-vllm-issue237-toolcall-on-loop.py --check",
             start,
         )
@@ -453,6 +460,7 @@ class Wiring(unittest.TestCase):
         self.assertIn("DSPARK_ENABLE_ISSUE237_TOOLCALL_ON_LOOP=0", env)
         self.assertIn("DSPARK_ISSUE237_TOOLCALL_MATCH_FLOOR=2.0", env)
         self.assertIn("DSPARK_ISSUE237_TOOLCALL_RECENT_FRACTION=0.25", env)
+        self.assertIn("DSPARK_ISSUE237_TOOLCALL_MAX_TRIPS=3", env)
         self.assertIn("scripts/test-issue237-toolcall-on-loop.py", CI.read_text())
 
 

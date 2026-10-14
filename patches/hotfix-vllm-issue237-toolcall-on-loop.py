@@ -29,6 +29,9 @@ The intervention uses the same loop detection as the circuit breaker
    loop stops burning tokens.
 4. If no tool matches, it falls back to the circuit-breaker behavior: abort
    and force ``finish_reason`` to "stop".
+5. Escalates: after ``DSPARK_ISSUE237_TOOLCALL_MAX_TRIPS`` (default 3) loop
+   trips on the same last user prompt, it stops synthesizing a tool call and
+   just forces ``finish_reason`` to "stop" so control returns to the user.
 
 Detection is fail-open (a detection error does not break the normal streaming
 path); the intervention is deterministic.
@@ -298,6 +301,47 @@ HELPER_NEW = (
     "_issue237_paragraph_state = {}\n"
     "_issue237_line_state = {}\n"
     "_issue237_toolcall_state = {}\n"
+    "\n"
+    "def _issue237_last_user_prompt_key(request: object) -> str:\n"
+    "    \"\"\"Return a stable hash of the last user message content.\n"
+    "\n"
+    "    When a narration loop starts, the user stops providing input and the\n"
+    "    client races ahead issuing requests against the same prompt, so the\n"
+    "    last user message stays constant across the loop. Hashing it gives a\n"
+    "    stable key to count trips across requests from the same turn; a new\n"
+    "    user prompt produces a new hash and resets the count.\n"
+    "    \"\"\"\n"
+    "    import hashlib as _hashlib\n"
+    "    try:\n"
+    "        msgs = getattr(request, \"messages\", None) or []\n"
+    "        content = \"\"\n"
+    "        for m in reversed(msgs):\n"
+    "            if isinstance(m, dict) and m.get(\"role\") == \"user\":\n"
+    "                content = m.get(\"content\") or \"\"\n"
+    "                break\n"
+    "        if isinstance(content, list):\n"
+    "            content = \" \".join(\n"
+    "                str(p.get(\"text\", \"\")) if isinstance(p, dict) else str(p)\n"
+    "                for p in content\n"
+    "            )\n"
+    "        return _hashlib.sha256(str(content).encode()).hexdigest()\n"
+    "    except Exception:\n"
+    "        return \"\"\n"
+    "\n"
+    "def _issue237_max_trips() -> int:\n"
+    "    \"\"\"Return the number of tool-call recoveries before escalating to stop.\n"
+    "\n"
+    "    After this many loop trips on the same user prompt, the hotfix stops\n"
+    "    synthesizing a tool call and just forces ``finish_reason`` to \"stop\"\n"
+    "    so control returns to the user. Default 3.\n"
+    "    \"\"\"\n"
+    "    import os as _os\n"
+    "    try:\n"
+    "        return int(_os.environ.get(\"DSPARK_ISSUE237_TOOLCALL_MAX_TRIPS\", \"3\"))\n"
+    "    except ValueError:\n"
+    "        return 3\n"
+    "\n"
+    "_issue237_escalation_state = {}\n"
 )
 
 REGION_OLD = (
@@ -321,22 +365,35 @@ REGION_NEW = (
     "                            if _para >= _pthr or _line >= _lthr:\n"
     "                                if not _issue237_toolcall_state.setdefault(request_id, {}).get(\"tripped\"):\n"
     "                                    _issue237_toolcall_state.setdefault(request_id, {})[\"tripped\"] = True\n"
-    "                                    _name = _issue237_match_tool(\n"
-    "                                        _issue237_recent_text(_txt, _issue237_recent_fraction()),\n"
-    "                                        request.tools,\n"
-    "                                        delta_text,\n"
-    "                                    )\n"
-    "                                    if _name:\n"
-    "                                        _issue237_toolcall_on_loop_log(\n"
-    "                                            f\"synthesize tool={_name} \"\n"
-    "                                            f\"paragraphs={_para}/{_pthr} \"\n"
-    "                                            f\"lines={_line}/{_lthr}\"\n"
+    "                                    _pkey = _issue237_last_user_prompt_key(request)\n"
+    "                                    _trips = _issue237_escalation_state.get(_pkey, 0) + 1\n"
+    "                                    _issue237_escalation_state[_pkey] = _trips\n"
+    "                                    _maxtrips = _issue237_max_trips()\n"
+    "                                    if _trips < _maxtrips:\n"
+    "                                        _name = _issue237_match_tool(\n"
+    "                                            _issue237_recent_text(_txt, _issue237_recent_fraction()),\n"
+    "                                            request.tools,\n"
+    "                                            delta_text,\n"
     "                                        )\n"
-    "                                        delta_message = _issue237_synthesize_tool_call(_name)\n"
-    "                                        tools_streamed[i] = True\n"
+    "                                        if _name:\n"
+    "                                            _issue237_toolcall_on_loop_log(\n"
+    "                                                f\"synthesize tool={_name} \"\n"
+    "                                                f\"paragraphs={_para}/{_pthr} \"\n"
+    "                                                f\"lines={_line}/{_lthr} \"\n"
+    "                                                f\"trips={_trips}/{_maxtrips}\"\n"
+    "                                            )\n"
+    "                                            delta_message = _issue237_synthesize_tool_call(_name)\n"
+    "                                            tools_streamed[i] = True\n"
+    "                                        else:\n"
+    "                                            _issue237_toolcall_on_loop_log(\n"
+    "                                                f\"no-match paragraphs={_para}/{_pthr} \"\n"
+    "                                                f\"lines={_line}/{_lthr} \"\n"
+    "                                                f\"trips={_trips}/{_maxtrips}\"\n"
+    "                                            )\n"
     "                                    else:\n"
     "                                        _issue237_toolcall_on_loop_log(\n"
-    "                                            f\"no-match paragraphs={_para}/{_pthr} \"\n"
+    "                                            f\"escalate stop trips={_trips}/{_maxtrips} \"\n"
+    "                                            f\"paragraphs={_para}/{_pthr} \"\n"
     "                                            f\"lines={_line}/{_lthr}\"\n"
     "                                        )\n"
     "                                    # Abort the request at the engine so\n"
@@ -353,7 +410,7 @@ REGION_NEW = (
 
 # Self-pins: the region constant must not drift inside this file.
 REGION_OLD_SHA256 = "94de98ec8d8311897767cd54de6b1119a5944eae3b9c0328639e66ae1630913d"
-REGION_NEW_SHA256 = "2113403150d37037f1c8c35fb9ce05a9b62ec54278ba285a01208169c16ae19e"
+REGION_NEW_SHA256 = "0c0e5cb1160a3a1636680d1c50a55a01a831360b923414a6adcf0a07898e0e80"
 
 
 def _sha256(data: bytes) -> str:
@@ -458,6 +515,38 @@ def _issue237_verify_matcher(
     return True, "matcher maps loop text to declared tools and stays quiet otherwise"
 
 
+def _issue237_verify_escalation(last_user_prompt_key, max_trips) -> tuple[bool, str]:
+    """Behavioral proof that the escalation key is stable for the same last
+    user message and distinct for different ones, and that the max-trips
+    default is sane. Returns (ok, why)."""
+    class _Req:
+        def __init__(self, messages):
+            self.messages = messages
+
+    # Same last user message -> same key (stable across the loop).
+    k1 = last_user_prompt_key(_Req([{"role": "user", "content": "check the API key"}]))
+    k2 = last_user_prompt_key(_Req([{"role": "user", "content": "check the API key"}]))
+    if not k1 or k1 != k2:
+        return False, f"prompt key not stable for same message: {k1!r} vs {k2!r}"
+
+    # Different last user message -> different key (resets the count).
+    k3 = last_user_prompt_key(_Req([{"role": "user", "content": "read the file"}]))
+    if k3 == k1:
+        return False, "prompt key collided for different messages"
+
+    # A list content (multimodal) must not raise.
+    k4 = last_user_prompt_key(_Req([{"role": "user", "content": [{"type": "text", "text": "hi"}]}]))
+    if not k4:
+        return False, "prompt key failed on list content"
+
+    # Default max trips must be a positive integer.
+    mt = max_trips()
+    if not isinstance(mt, int) or mt < 1:
+        return False, f"max_trips default not a positive int: {mt!r}"
+
+    return True, "escalation key is stable per last user message and max_trips is sane"
+
+
 def _self_check(patched_src: bytes) -> tuple[bool, str]:
     """Behavioral proof: the helpers are present, the module compiles, and the
     matcher maps loop text to a declared tool while staying quiet when no tool
@@ -489,6 +578,9 @@ def _self_check(patched_src: bytes) -> tuple[bool, str]:
                 "_issue237_match_tool",
                 "_issue237_synthesize_tool_call",
                 "_issue237_toolcall_on_loop_log",
+                "_issue237_last_user_prompt_key",
+                "_issue237_max_trips",
+                "_issue237_escalation_state",
             ):
                 if not hasattr(patched, attr):
                     return False, f"helper {attr} missing in patched module"
@@ -498,6 +590,13 @@ def _self_check(patched_src: bytes) -> tuple[bool, str]:
             ok, why = _issue237_verify_matcher(
                 patched._issue237_match_tool,
                 patched._issue237_synthesize_tool_call,
+            )
+            if not ok:
+                return False, why
+
+            ok, why = _issue237_verify_escalation(
+                patched._issue237_last_user_prompt_key,
+                patched._issue237_max_trips,
             )
             if not ok:
                 return False, why

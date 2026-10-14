@@ -1287,3 +1287,61 @@ new-step block changes, C4 layer-specific indices and mixed-batch slicing.
 Runtime qualification and timing must be reported separately; reduced conversion
 count alone is not an end-to-end speedup claim. Context-parallel and full-graph
 prefill configurations beyond the qualified GPU-runner lane remain unverified.
+
+## Issue #237 — synthesize a tool call on the "Let me [action]" narration loop (default OFF)
+
+**Symptom.** In `thinking_mode: "chat"` with large conversations, the model
+narrates an action it intends to take ("Let me check the API key") but never
+emits the tool-call DSML structure, so it loops on the narration and burns
+tokens. The earlier circuit-breaker hotfix breaks the loop by aborting the
+request and forcing `finish_reason="stop"`, but that discards the intended
+tool call entirely. See MIA issue #237.
+
+**What the patcher does.** `patches/hotfix-vllm-issue237-toolcall-on-loop.py`
+(source-exact, fail-closed) adds a helper block and one anchored hunk to
+`entrypoints/openai/chat_completion/serving.py`. On a narration-loop trip it:
+
+1. Detects the loop with the same near-duplicate logic as the circuit breaker
+   (a sliding-window paragraph detector and a repeated-line detector, both
+   stateful per request id).
+2. Matches the loop text against the tools declared in `request.tools` by
+   token overlap. The tool name is a stable, language-independent identifier
+   the model tends to echo even when narrating in another language, so it is
+   weighted double; the description is a secondary signal. No English
+   narration prefix is required, so the matcher is language-agnostic.
+3. Scores the last `DSPARK_ISSUE237_TOOLCALL_RECENT_FRACTION` (default `0.25`)
+   of the accumulated output text plus the current `delta_text`, taking the
+   max score per tool, and picks the best match above the env-tunable floor
+   `DSPARK_ISSUE237_TOOLCALL_MATCH_FLOOR` (default `2.0` = one name-token
+   overlap).
+4. If a tool matches, synthesizes a `DeltaMessage` carrying that tool call
+   (empty `{}` arguments, id minted like the parser mints real calls), marks
+   `tools_streamed` so the finish logic reports `finish_reason="tool_calls"`,
+   and aborts the request at the engine so the loop stops burning tokens.
+5. If no tool matches, it falls back to the circuit-breaker behavior: abort
+   and force `finish_reason="stop"`.
+6. Escalates: after `DSPARK_ISSUE237_TOOLCALL_MAX_TRIPS` (default `3`) loop
+   trips on the same last user prompt, it stops synthesizing a tool call and
+   just forces `finish_reason="stop"` so control returns to the user. The
+   trip count is keyed on a hash of the last user message, so a new user
+   prompt resets it; this prevents an endless loop where the client races
+   ahead re-issuing requests against the same prompt.
+
+Detection is fail-open (a detection error does not break the normal streaming
+path); the intervention is deterministic. The anchored region (the
+`previous_texts[i] += delta_text` line) must appear exactly once and is
+sha256-pinned; after writing, a self-check must pass or the original bytes are
+restored and the boot fails.
+
+**Gates.** Default `0` changes no bytes. `1` requires the exact pinned identity
+on both ranks (`--check` preflight worker then head, apply at container start,
+post-apply digest verification, atomic same-directory replace). The compose
+entrypoint chains the apply with `|| exit 1`. CPU suite:
+`python3 scripts/test-issue237-toolcall-on-loop.py` (runs in `ci-validate`).
+
+**Companion knobs.** `DSPARK_ISSUE237_TOOLCALL_ON_LOOP_LOG` (`1` emits one
+`[dspark-issue237-toolcall-on-loop]` line per trip, `0` default silences it),
+`DSPARK_ISSUE237_TOOLCALL_MATCH_FLOOR` (default `2.0`),
+`DSPARK_ISSUE237_TOOLCALL_RECENT_FRACTION` (default `0.25`), and
+`DSPARK_ISSUE237_TOOLCALL_MAX_TRIPS` (default `3`). Recreate both ranks when
+flipping.

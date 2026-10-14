@@ -1,3 +1,8 @@
+## 2026-10-13
+
+### Added
+- **`DSPARK_ENABLE_ISSUE237_TOOLCALL_ON_LOOP` hotfix**: on a narration loop, match the loop text against the tools declared in `request.tools` (language-agnostic, tool name weighted double) and synthesize a real tool call (`finish_reason="tool_calls"`); when no tool matches, abort the request and force `finish_reason="stop"`. The matcher scores the last `DSPARK_ISSUE237_TOOLCALL_RECENT_FRACTION` (default `0.25`) of the accumulated output text plus the current `delta_text`, taking the max score per tool. After `DSPARK_ISSUE237_TOOLCALL_MAX_TRIPS` (default `3`) loop trips on the same last user prompt, it stops synthesizing and just forces `finish_reason="stop"` so control returns to the user. Default-off, source-exact, fail-closed patcher applied on both ranks. Companion knobs: `DSPARK_ISSUE237_TOOLCALL_ON_LOOP_LOG`, `DSPARK_ISSUE237_TOOLCALL_MATCH_FLOOR`, `DSPARK_ISSUE237_TOOLCALL_RECENT_FRACTION`, `DSPARK_ISSUE237_TOOLCALL_MAX_TRIPS`. Mitigates #237.
+
 ## 2026-09-08
 
 ### Security

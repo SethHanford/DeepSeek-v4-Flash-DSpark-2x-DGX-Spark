@@ -411,6 +411,11 @@ services:
       # 0.25 = the last quarter). Scoring only the recent window keeps the
       # matcher on the tool the model is looping on as context fills.
       DSPARK_ISSUE237_TOOLCALL_RECENT_FRACTION: "${DSPARK_ISSUE237_TOOLCALL_RECENT_FRACTION:-0.25}"
+      # Loop trips on the same last user prompt before the hotfix stops
+      # synthesizing a tool call and just forces finish_reason="stop" (default
+      # 3). Returns control to the user instead of racing ahead on an endless
+      # loop.
+      DSPARK_ISSUE237_TOOLCALL_MAX_TRIPS: "${DSPARK_ISSUE237_TOOLCALL_MAX_TRIPS:-3}"
       # Issue #66: GPU V2 thinking_token_budget hotfix. 0 (default) = stock
       # sampler (HTTP 400 if a client sends the field). 1 = apply at boot
       # (fail-closed) so explicit thinking_token_budget works. Omit-field
